@@ -15,10 +15,40 @@ namespace wraith::offsets
     // modern skin does not carry (see Features/M2/Modern).
     constexpr uintptr_t CM2Model_FinalizeSkin = 0x00837A40;
 
-    // M2 version gate: the stock loader accepts only the WotLK version. Relaxing these two branches lets
+    // M2 version gate: the stock loader accepts only the 264 version. Relaxing these two branches lets
     // it also accept the modern (MD21-era) inner MD20 versions.
     constexpr uintptr_t VersionGate_InitJA  = 0x0083CF51;   // version-too-high branch -> NOP x6
     constexpr uintptr_t VersionGate_AnimJBE = 0x0083C745;   // anim-parse branch        -> JMP short
+
+    // .skin filename builder __cdecl(modelPathStem = CM2Model+0x3c, profileIndex, outBuf): copies the model
+    // path into outBuf, strips the extension, appends "%02d.skin". outBuf is a fixed engine buffer (0x108).
+    constexpr uintptr_t M2_BuildSkinPath = 0x00835A80;
+    // CM2Model skin-profile loader __thiscall(model, profileIndex): builds the NN.skin path, opens+maps the
+    // file, parses it, attaches the parsed profile at model+0x170 SYNCHRONOUSLY, then wires and schedules an
+    // async finalize record at model+0xc. The finalize is idempotent: it skips when model+8 bit1 is already
+    // set, so re-invoking this loader runs the finalize at most once.
+    constexpr uintptr_t CM2_LoadSkinProfile = 0x0083CB40;
+    // Size of the engine .skin path buffer the loader passes to M2_BuildSkinPath.
+    constexpr uint32_t  M2_SkinPathBufSize = 0x108;
+
+    // Storage file API the .skin loader uses to read a file.
+    // Open __cdecl(0, path, flag, &handle) -> nonzero on success, fills handle.
+    constexpr uintptr_t Storage_FileOpen  = 0x00424B50;
+    // Map __cdecl(handle, &sizeOut) -> mapped file bytes pointer (0 on failure); sizeOut may be null.
+    constexpr uintptr_t Storage_FileMap   = 0x004218C0;
+    // Close __cdecl(handle).
+    constexpr uintptr_t Storage_FileClose = 0x00422910;
+
+    // --- M2 external .anim ---
+    // External .anim read-completion callback __cdecl(node): runs once after the file bytes are read into
+    // the load buffer and BEFORE the M2Track offsets are rebased against it. node+0x08 =
+    // I/O record (record+0x04 = buffer ptr, record+0x08 = size), node+0x10 = seqIdx, node+0x0c = model.
+    constexpr uintptr_t CM2_AnimLoadComplete = 0x0083D840;
+    // I/O record field offsets used by the rebase: the .anim buffer base and its size.
+    constexpr uint32_t  AnimRecord_Buffer = 0x04;
+    constexpr uint32_t  AnimRecord_Size   = 0x08;
+    // Load node field: the I/O record pointer.
+    constexpr uint32_t  AnimNode_Record   = 0x08;
 
     // --- M2 per-batch alpha ---
     // Shared per-batch alpha/material/cull setter (used by both the creature and doodad draw paths). It

@@ -18,6 +18,15 @@ namespace modern = wraith::features::m2::modern;
 
 namespace
 {
+    constexpr uint32_t kMagicSFID = 0x44494653;   // 'SFID' top-level chunk: array of skin FileDataIDs
+
+    // Top-level MD21 chunk header: [4-byte magic][u32 size][data].
+    struct ChunkHeader
+    {
+        uint32_t magic;
+        uint32_t size;
+    };
+
     using InitFn = int(__fastcall*)(void*);  // CM2Model::Init __thiscall(this)
     InitFn g_initOriginal = nullptr;
 

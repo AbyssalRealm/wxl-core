@@ -216,6 +216,7 @@ namespace wraith::m2
     static_assert(offsetof(M2Ribbon, priorityPlane) == 0xAC, "M2Ribbon.priorityPlane");
     static_assert(sizeof(M2SkinSection) == 0x30, "M2SkinSection");
     static_assert(offsetof(M2SkinSection, level) == 0x02, "level");
+    static_assert(offsetof(M2SkinProfile, submeshCount) == 0x1C, "submeshCount");
     static_assert(offsetof(M2SkinProfile, batches) == 0x28, "batches");
     static_assert(sizeof(Md21Header) == 8, "Md21Header");
     static_assert(sizeof(M2Camera) == 0x64, "M2Camera");

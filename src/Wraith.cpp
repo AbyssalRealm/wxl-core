@@ -3,6 +3,7 @@
 #include "Core/Logger.hpp"
 #include "Core/Hook.hpp"
 #include "Features/M2/MD21.hpp"
+#include "Features/Anim/Anim.hpp"
 #include "Features/Ribbon/Ribbon.hpp"
 
 extern "C" __declspec(dllexport) void Wraith() {}
@@ -18,6 +19,7 @@ namespace
             return 1;
 
         wraith::features::m2::Install();
+        wraith::features::anim::Install();
         wraith::features::ribbon::Install();
 
         if (!wraith::hook::EnableAll())
