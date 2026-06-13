@@ -317,8 +317,10 @@ namespace
         return base;
     }
 
-    // A level>0 submesh is a sub-LOD the 264 engine does not handle; zero its body and mark it so its batch
-    // is parked. Otherwise force >=1 bone influence and clear byte 0x11.
+    // A level>0 submesh is a (level<<16|id) sub-batch the 264 engine cannot draw. Park it by zeroing its
+    // geometry and marking badSubmesh so its batch is skipped, but KEEP boneCount/boneInfluences intact:
+    // native FinalizeSkin divides boneCountMax by every submesh boneCount (parked or not), so a zeroed
+    // boneCount is a divide-by-zero. A drawn (level 0) submesh just gets a >=1 bone-influence floor.
     void FixSubmeshes(sdk::M2SkinProfile* skin, std::vector<uint8_t>& badSubmesh)
     {
         badSubmesh.assign(skin->submeshCount, 0);
@@ -327,7 +329,13 @@ namespace
             auto* s = &skin->submeshes[i];
             if (s->level > 0)
             {
-                memset(reinterpret_cast<uint8_t*>(s) + 0x2, 0, 0x14 - 0x2);
+                s->level           = 0;
+                s->vertexStart     = 0;
+                s->vertexCount     = 0;
+                s->indexStart      = 0;
+                s->indexCount      = 0;
+                s->boneComboIndex  = 0;
+                s->centerBoneIndex = 0;
                 badSubmesh[i] = 1;
             }
             else if (s->boneInfluences == 0)
