@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-// Shared IPC contract between Wow.exe (Wraith.dll, 32-bit) and WraithHost.exe (64-bit). The transport is a
+// Shared IPC contract between Client (Wraith.dll, 32-bit) and WraithHost.exe (64-bit). The transport is a
 // raw Win32 shared-memory window plus two auto-reset events (a single-slot request/response mailbox). The
 // payload is a FlexBuffers buffer (arch/endian-neutral, so 32-bit and 64-bit agree on the bytes).
 //
@@ -42,7 +42,4 @@ namespace wraith::ipc
 #pragma pack(pop)
 
     static_assert(sizeof(ControlHeader) == kHeaderSize, "ControlHeader must be 64 bytes");
-
-    // Request payload  = FlexBuffers vector [ uint op, uint arg, uint arg2 ].
-    // Response payload = FlexBuffers vector [ uint status, string path ].
 }
