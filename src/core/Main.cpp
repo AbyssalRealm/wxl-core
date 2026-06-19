@@ -1,0 +1,60 @@
+// DLL entry: open the log, init hooks, wait for the graphics device, install render detours.
+// Copyright (C) 2026 WarcraftXL
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+#include <windows.h>
+
+#include "core/Hook.hpp"
+#include "core/Logger.hpp"
+#include "game/Catalog.hpp"
+#include "game/gx/Gx.hpp"
+#include "runtime/RenderHooks.hpp"
+
+// IAT anchor: the patcher adds an import of this symbol so the loader maps the DLL.
+extern "C" __declspec(dllexport) void WarcraftXL() {}
+
+namespace
+{
+    constexpr int kDeviceWaitTicks = 600; // ~60 s at 100 ms
+
+    DWORD WINAPI MainThread(LPVOID)
+    {
+        // Wait for the graphics device, then install the render detours that publish the events the
+        // runtime scripts subscribe to (the scripts themselves registered at load time).
+        for (int i = 0; i < kDeviceWaitTicks && !wxl::game::gx::RawDevice(); ++i)
+            Sleep(100);
+
+        wxl::runtime::render::Install();
+        WLOG_INFO("wxl-core ready");
+        return 0;
+    }
+}
+
+BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID)
+{
+    if (reason == DLL_PROCESS_ATTACH)
+    {
+        DisableThreadLibraryCalls(module);
+
+        CreateDirectoryA("Logs", nullptr);
+        wxl::core::log::Open("Logs\\wxl-core.log");
+        WLOG_INFO("wxl-core starting (build %s %s)", __DATE__, __TIME__);
+
+        wxl::core::hook::Init();
+        wxl::game::RegisterAllBindings();
+        CloseHandle(CreateThread(nullptr, 0, &MainThread, nullptr, 0, nullptr));
+    }
+    return TRUE;
+}
