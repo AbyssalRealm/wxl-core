@@ -1,55 +1,67 @@
-# Wraith Engine - Engine
+# WarcraftXL
 
-**The client-side runtime.** This is the part that runs: the patcher that gets us into the
-process, the hook layer, the modern-model backport, and the Direct3D 12 proxy that the native
-renderer will grow out of.
+**A modding framework for the World of Warcraft 3.3.5a (build 12340) client.**
 
-Part of the [Wraith Engine](https://github.com/WraithEngine) project - bringing **Legion 7.3.5**
-rendering to the **WotLK 3.3.5a (build 12340)** client without replacing the client, the data, or
-the protocol. See the organization page for the vision and the two-phase roadmap.
+WarcraftXL loads into the running client and gives mods a clean, typed way to talk to the engine -
+the same idea as RED4ext for Cyberpunk 2077 or SKSE for Skyrim. The framework owns the hard,
+repetitive parts (getting into the process, the hook engine, client offsets, engine bindings, an
+event bus, file-format contracts); your mods - here called **modules / scripts** - own the actual features.
 
-> **Phase 1.** Today the engine *translates* modern structures into what the 3.3.5a client already
-> knows how to draw - Proton-style. The native D3D12 path is being grown alongside it. This repo is
-> a working skeleton under active development, not a finished product.
+> **Core principle.** If something is needed everywhere and always works the same way, it belongs in
+> the core. Anything that is a *feature* - a decision, an effect, an editor - is a module. The core
+> stays small and reusable; the modules stay free to do whatever they want.
 
-## What it does
+## How it works
 
-Everything happens inside the running client, through runtime hooks - no patched data files.
+`WarcraftXL.dll` is the framework. It boots inside the client, brings up the hook engine, and raises
+a set of events. Each module is a small self-contained unit under `scripts/` that subscribes to those
+events and uses the core's bindings to read and drive the game. Drop a module in, rebuild, and it is
+live - no separate injector, no patched data files.
 
-- **Modern M2 models on the old loader.** Relaxes the client's M2 version gate and rebuilds, at
-  load time, the material contract a modern (`MD21`-era) skin doesn't carry - so the stock
-  creature/doodad pipeline draws models it was never meant to understand.
-- **Faithful per-batch alpha.** Hooks the shared alpha/material setter so modern blend modes pick
-  the correct alpha-test reference instead of falling back to the WotLK default.
-- **Multi-texture ribbons.** Expands modern ribbon emitters and combines their per-layer textures,
-  which the single-texture WotLK ribbon path can't represent on its own.
-- **A real D3D12 device.** A drop-in `d3d9.dll` proxy forwards the genuine device while forcing
-  **D3D9On12** onto a D3D12 device the engine owns - the foothold the native renderer is built on.
+The core is organised as four pillars, so a module never touches a raw address itself:
 
-## Architecture
+| Pillar | Namespace | What it gives a module |
+|---|---|---|
+| **Offsets** | `wxl::offsets` | The curated client addresses and struct layouts. Internal - modules never include these directly. |
+| **Bindings** | `wxl::game` | Typed, zero-overhead calls into engine functions (`Native<Fn>(addr)(args...)`) plus an enumerable catalog of `{name, address, signature}`. |
+| **Events** | `wxl::events` | A POD-dispatch event bus. A module subclasses `EventScript` and binds member functions with `on<&Self::OnEndScene>(Event::OnEndScene)`. |
+| **Assets** | `wxl::asset` | In-memory contracts for the client's file formats (ADT, WMO, M2, WDT, WDL) so modules read structured data, not byte soup. |
 
-Three artifacts, each with one job:
+A module looks like this - bind in the constructor, react in the handler:
 
-| Artifact | Role |
-|---|---|
-| `WraithPatcher.exe` | Standalone tool. Adds `Wraith.dll` to the target executable's import table (PE surgery) so it loads at startup - no runtime injector. |
-| `Wraith.dll` | The core. Bootstraps off the loader lock on its own thread, brings up the hook engine (MinHook), and installs the M2 and Ribbon features. |
-| `d3d9.dll` | The proxy. Forwards to the real `d3d9`, forces D3D9On12 onto the engine's own D3D12 device, and hosts the D3D12-side rendering. *Must be named `d3d9.dll` - it's a search-order proxy, not branding.* |
+```cpp
+class MyModule final : public wxl::events::EventScript {
+public:
+    MyModule() { on<&MyModule::OnEndScene>(wxl::events::Event::OnEndScene); }
+    void OnEndScene(const wxl::events::EndSceneArgs& a) { /* draw, read world, edit... */ }
+};
+MyModule g_myModule; // file-scope instance self-registers at load
+```
+
+## Layout
 
 ```
 src/
-├── Core/        Hook · Logger · Mem        hook-engine bring-up, logging, memory helpers
-├── Engine/      Offsets · Gx · View        client offsets + typed views over engine objects
-├── Features/
-│   ├── M2/      MD21 · Modern · AlphaScope  the modern-model backport
-│   ├── Ribbon/  Ribbon                      multi-texture ribbon combine
-│   └── D3D12/   Device · Capture · Proxy    the d3d9 proxy and D3D12 device  →  builds d3d9.dll
-└── Wraith.cpp   entry point  →  builds Wraith.dll
-Patcher/         Patcher.cpp  →  builds WraithPatcher.exe
+├── core/       Hook · Logger · Mem · Main     process bring-up, hook engine, entry point
+├── offsets/    engine/ · game/                client addresses + struct layouts (internal)
+├── game/       camera · doodad · world · ui   typed engine bindings (the wxl::game pillar)
+│               m2 · wmo · adt · unit · gx · 
+│               io · mem ...
+├── events/     Event · EventScript            the event bus + the module base class
+├── asset/      adt · wmo · m2 · wdt · wdl     file-format contracts
+├── services/   asset                          higher-level services over the pillars
+└── runtime/    RenderHooks                    per-frame / device hooks the events ride on
+
+scripts/              the modules (each builds into WarcraftXL.dll)
+├── wxl-mini-noggit   an in-client map editor (ImGui + 3D gizmo): pick a doodad, move/rotate/scale it
+├── wxl-unit-outline  a unit outline / highlight effect
+└── wxl-glue-unlock   glue-screen unlock
+
+deps/           vendored: MinHook, Dear ImGui + ImGuizmo, StormLib, FlatBuffers
 ```
 
-All addresses the hooks rely on live in `src/Engine/Offsets.hpp`, named and annotated. The reasoning
-behind each one belongs in the project's Documentation Wiki - the code follows it.
+Every address the bindings rely on lives in `src/offsets/`, named and annotated. The reasoning behind
+each one is kept in the project's RE documentation - the code follows it.
 
 ## Building
 
@@ -61,42 +73,33 @@ The target client is a 32-bit process, so everything builds **Win32**.
 - A legally-obtained 3.3.5a (12340) client
 
 ```sh
-cmake -B build -DCLIENT_PATH="C:/path/to/your/3.3.5a/client"
-cmake --build build --config Release
+cmake -B build
+cmake --build build --config Release --target WarcraftXL
 ```
 
-Build outputs: `Wraith.dll`, `d3d9.dll`, `WraithPatcher.exe`. When `CLIENT_PATH` is set, all three
-are copied into the client automatically after the build. Vendored MinHook builds with the project.
+Output: `WarcraftXL.dll`. Vendored dependencies build with the project.
 
 ## Install
 
-1. Run `WraithPatcher.exe` **once** against your `Wow.exe` to add the import entry.
-2. Make sure `Wraith.dll` and `d3d9.dll` sit next to `Wow.exe`.
-3. Launch. `Wraith.dll` writes a startup log on bootstrap - check it to confirm the chain is live.
+1. Place `WarcraftXL.dll` next to `Wow.exe` and load it into the client (import-table entry / loader).
+2. Launch. The framework writes a startup log on bootstrap - check it to confirm modules came up.
 
-> Patching modifies your client binary. Work on a **copy**, keep an untouched backup, and only
-> point this at a client and server you are permitted to modify and connect to.
-
-## Status
-
-- ✅ Injection chain - patcher (import-table surgery) → `Wraith.dll` → hook engine
-- ✅ M2 modern-model backport - version gate, material contract, per-batch alpha
-- ✅ Multi-texture ribbon combine
-- ✅ `d3d9.dll` → D3D9On12 → D3D12 device bridge
-- 🚧 Widening the native D3D12 render path (Phase 2 groundwork)
+> Modifying a client binary is on you: work on a **copy**, keep an untouched backup, and only point
+> this at a client and server you are permitted to modify and connect to.
 
 ## Legal
 
-Wraith Engine is an **interoperability project**. It distributes no Blizzard code and no game
-assets, and runs only against a client you supply and own, reading that client's own files at
-runtime. Reverse-engineering is limited to what is necessary for interoperability.
+WarcraftXL is an **interoperability project**. It distributes no Blizzard code and no game assets, and
+runs only against a client you supply and own, reading that client's own files at runtime.
+Reverse-engineering is limited to what is necessary for interoperability.
 
-World of Warcraft and Wrath of the Lich King are trademarks of Blizzard Entertainment. This project
-is not affiliated with or endorsed by Blizzard.
+World of Warcraft and Wrath of the Lich King are trademarks of Blizzard Entertainment. This project is
+not affiliated with or endorsed by Blizzard.
 
 ## License
 
 Released under the **GNU General Public License v3.0** - see [LICENSE](LICENSE).
 
-Bundles [MinHook](https://github.com/TsudaKageyu/minhook) (© Tsuda Kageyu, BSD 2-Clause) under
-`vendor/minhook`, with its license retained.
+Bundles [MinHook](https://github.com/TsudaKageyu/minhook) (© Tsuda Kageyu, BSD 2-Clause),
+[Dear ImGui](https://github.com/ocornut/imgui) + [ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo),
+and [StormLib](https://github.com/ladislav-zezula/StormLib) under `deps/`, with their licenses retained.
