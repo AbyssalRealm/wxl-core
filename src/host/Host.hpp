@@ -40,11 +40,16 @@ namespace wxl::host
     using ExistsFn = bool (*)(std::string_view name);
     void RegisterExists(const char* name, ExistsFn fn);
 
+    enum class ServedOrigin { Client, Warm };
+    using ServedFn = void (*)(std::string_view name, std::span<const uint8_t> bytes, ServedOrigin origin);
+    void RegisterServed(const char* name, ServedFn fn);
+
     // --- pipeline entry points (called by the host serve loop, NOT by modules) ---
 
     bool Provide(std::string_view name, std::vector<uint8_t>& out);
     bool Transform(std::string_view name, std::span<const uint8_t> raw, std::vector<uint8_t>& out);
     bool Exists(std::string_view name);
+    void NotifyServed(std::string_view name, std::span<const uint8_t> bytes, ServedOrigin origin);
 
     // --- registry introspection ---
 

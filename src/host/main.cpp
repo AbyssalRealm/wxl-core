@@ -129,18 +129,12 @@ namespace
         HOST_CONSOLE("open  %-44s -> OK inline (%u B)\n", name, size);
     }
 
-    // Produce the bytes finally served for `name`, firing the host hooks along the way: a provider may
-    // serve it without touching the archives; otherwise read raw, offer it to the transform hooks (first
-    // that reshapes wins), else raw passthrough. Returns false only on a miss (no provider, not in archives).
+    // Produce the bytes finally served for `name` from the archives: read raw, offer it to the transform
+    // hooks (first that reshapes wins), else raw passthrough. Returns false only on a miss (not in archives).
+    // Provider hooks are NOT fired here -- the caller fires them first (a provider, e.g. the cache module,
+    // short-circuits before any archive read).
     bool ProduceServed(const std::string& name, std::vector<uint8_t>& out)
     {
-        std::vector<uint8_t> provided;
-        if (wxl::host::Provide(name, provided))
-        {
-            out = std::move(provided);
-            return true;
-        }
-
         std::vector<uint8_t> raw;
         if (!g_mpq->ReadAll(name, raw))
             return false;
@@ -157,6 +151,13 @@ namespace
 
     void HandleFileOpen(flexbuffers::Builder& fbb, const std::string& name)
     {
+        std::vector<uint8_t> provided;
+        if (wxl::host::Provide(name, provided))
+        {
+            RespondWithFile(fbb, name.c_str(), std::move(provided));
+            return;
+        }
+
         std::vector<uint8_t> served;
         if (!ProduceServed(name, served))
         {
@@ -164,6 +165,8 @@ namespace
             HOST_CONSOLE("open  %-44s -> MISS\n", name.c_str());
             return;
         }
+
+        wxl::host::NotifyServed(name, served, wxl::host::ServedOrigin::Client);
         RespondWithFile(fbb, name.c_str(), std::move(served));
     }
 

@@ -31,6 +31,7 @@ namespace wxl::host
         std::vector<Hook<TransformFn>>& Transforms() { static std::vector<Hook<TransformFn>> v; return v; }
         std::vector<Hook<ProvideFn>>&   Providers()  { static std::vector<Hook<ProvideFn>>   v; return v; }
         std::vector<Hook<ExistsFn>>&    Existers()   { static std::vector<Hook<ExistsFn>>    v; return v; }
+        std::vector<Hook<ServedFn>>&    Serveds()    { static std::vector<Hook<ServedFn>>    v; return v; }
     }
 
     void RegisterTransform(const char* name, TransformFn fn)
@@ -54,6 +55,13 @@ namespace wxl::host
         wxl::core::log::Printf("host: + exists hook '%s'", name ? name : "(unnamed)");
     }
 
+    void RegisterServed(const char* name, ServedFn fn)
+    {
+        if (!fn) return;
+        Serveds().push_back({ name, fn });
+        wxl::core::log::Printf("host: + served hook '%s'", name ? name : "(unnamed)");
+    }
+
     bool Provide(std::string_view name, std::vector<uint8_t>& out)
     {
         for (const auto& h : Providers())
@@ -75,17 +83,24 @@ namespace wxl::host
         return false;
     }
 
+    void NotifyServed(std::string_view name, std::span<const uint8_t> bytes, ServedOrigin origin)
+    {
+        for (const auto& h : Serveds())
+            h.fn(name, bytes, origin);
+    }
+
     uint32_t HandlerCount()
     {
-        return static_cast<uint32_t>(Transforms().size() + Providers().size() + Existers().size());
+        return static_cast<uint32_t>(Transforms().size() + Providers().size() + Existers().size() + Serveds().size());
     }
 
     void LogRegisteredHandlers()
     {
-        wxl::core::log::Printf("host: %u hook(s) registered (transform=%zu provider=%zu exists=%zu)",
-            HandlerCount(), Transforms().size(), Providers().size(), Existers().size());
+        wxl::core::log::Printf("host: %u hook(s) registered (transform=%zu provider=%zu exists=%zu served=%zu)",
+            HandlerCount(), Transforms().size(), Providers().size(), Existers().size(), Serveds().size());
         for (const auto& h : Transforms()) wxl::core::log::Printf("host:   transform <- %s", h.name ? h.name : "(unnamed)");
         for (const auto& h : Providers())  wxl::core::log::Printf("host:   provider  <- %s", h.name ? h.name : "(unnamed)");
         for (const auto& h : Existers())   wxl::core::log::Printf("host:   exists    <- %s", h.name ? h.name : "(unnamed)");
+        for (const auto& h : Serveds())    wxl::core::log::Printf("host:   served    <- %s", h.name ? h.name : "(unnamed)");
     }
 }
