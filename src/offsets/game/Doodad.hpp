@@ -89,4 +89,72 @@ namespace wxl::offsets::game::doodad
     constexpr size_t kChunkDoodadLinkOff = 0xC4;
     constexpr size_t kChunkDoodadHead    = 0xCC;
     constexpr size_t kNodeDoodad         = 0x04;
+
+    // --- typed views over the objects above ---
+    // The constants are the curated landmarks; these structs give named, typed access to the same fields,
+    // with every member offset checked against a constant at compile time (a wrong padding fails the build).
+    // Only RE'd fields are named; the gaps are explicit padding. Pointers are 4 bytes on the 32-bit client.
+#pragma pack(push, 1)
+    /** @brief Placed-doodad object: one per map M2 placement (the "d" pointer). */
+    struct MapDoodad
+    {
+        uint8_t  _pad00[kFlags];
+        uint32_t flags;            // kFlags
+        uint8_t  _pad10[kInstance - (kFlags + sizeof(uint32_t))];
+        void*    instance;         // kInstance -> M2Instance
+        float    bboxMin[3];       // kBBoxMin (degenerate at spawn)
+        uint8_t  _pad44[kCenterX - (kBBoxMinX + 3 * sizeof(float))];
+        float    center[3];        // kCenter
+        float    bboxMax[3];       // kBBoxMax
+        uint8_t  _pad60[kPosX - (kBBoxMaxX + 3 * sizeof(float))];
+        float    pos[3];           // kPos
+        float    scale;            // kScale
+        uint8_t  _pad7c[kWorldMatrix - (kScale + sizeof(float))];
+        float    worldMatrix[16];  // kWorldMatrix (staging copy; not what the renderer reads)
+    };
+    static_assert(offsetof(MapDoodad, flags)       == kFlags,       "MapDoodad.flags");
+    static_assert(offsetof(MapDoodad, instance)    == kInstance,    "MapDoodad.instance");
+    static_assert(offsetof(MapDoodad, bboxMin)     == kBBoxMinX,    "MapDoodad.bboxMin");
+    static_assert(offsetof(MapDoodad, center)      == kCenterX,     "MapDoodad.center");
+    static_assert(offsetof(MapDoodad, bboxMax)     == kBBoxMaxX,    "MapDoodad.bboxMax");
+    static_assert(offsetof(MapDoodad, pos)         == kPosX,        "MapDoodad.pos");
+    static_assert(offsetof(MapDoodad, scale)       == kScale,       "MapDoodad.scale");
+    static_assert(offsetof(MapDoodad, worldMatrix) == kWorldMatrix, "MapDoodad.worldMatrix");
+    static_assert(offsetof(MapDoodad, worldMatrix) + 12 * sizeof(float) == kWorldMatrixTransX, "MapDoodad.worldMatrix.trans");
+
+    /** @brief CM2 render instance (doodad+0x34): holds the live world matrix the renderer reads each frame. */
+    struct M2Instance
+    {
+        uint8_t  _pad00[kInstModel];
+        void*    model;            // kInstModel -> M2ModelCache
+        uint8_t  _pad30[kInstWorldMatrix - (kInstModel + sizeof(void*))];
+        float    worldMatrix[16];  // kInstWorldMatrix (READ every frame)
+    };
+    static_assert(offsetof(M2Instance, model)       == kInstModel,       "M2Instance.model");
+    static_assert(offsetof(M2Instance, worldMatrix) == kInstWorldMatrix, "M2Instance.worldMatrix");
+    static_assert(offsetof(M2Instance, worldMatrix) + 12 * sizeof(float) == kInstTransX, "M2Instance.worldMatrix.trans");
+
+    /** @brief Model cache node (instance+0x2c): inline file path plus the parsed MD20 header pointer. */
+    struct M2ModelCache
+    {
+        uint8_t  _pad00[kModelFullPath];
+        char     fullPath[kModelFileName - kModelFullPath]; // kModelFullPath (inline NUL-terminated path)
+        char*    fileName;         // kModelFileName (points into fullPath)
+        uint8_t  _pad144[kModelHeader - (kModelFileName + sizeof(char*))];
+        void*    header;           // kModelHeader -> MD20Header
+    };
+    static_assert(offsetof(M2ModelCache, fullPath) == kModelFullPath, "M2ModelCache.fullPath");
+    static_assert(offsetof(M2ModelCache, fileName) == kModelFileName, "M2ModelCache.fileName");
+    static_assert(offsetof(M2ModelCache, header)   == kModelHeader,   "M2ModelCache.header");
+
+    /** @brief MD20 header (modelCache->header): the model-LOCAL bounding box. */
+    struct MD20Header
+    {
+        uint8_t  _pad00[kHdrBBoxMinX];
+        float    bboxMin[3];       // kHdrBBoxMin
+        float    bboxMax[3];       // kHdrBBoxMax
+    };
+    static_assert(offsetof(MD20Header, bboxMin) == kHdrBBoxMinX, "MD20Header.bboxMin");
+    static_assert(offsetof(MD20Header, bboxMax) == kHdrBBoxMaxX, "MD20Header.bboxMax");
+#pragma pack(pop)
 }

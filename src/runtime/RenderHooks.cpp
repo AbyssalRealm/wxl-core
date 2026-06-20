@@ -64,8 +64,7 @@ namespace
      */
     void __fastcall hkDrawBatch(void* ctx, void* edx)
     {
-        g_curModel = *reinterpret_cast<void**>(
-            reinterpret_cast<char*>(ctx) + off::kDrawBatchCtxModelField);
+        g_curModel = static_cast<off::DrawBatchContext*>(ctx)->model;
         g_origDrawBatch(ctx, edx);
         g_curModel = nullptr;
     }
@@ -203,7 +202,7 @@ namespace
      */
     bool BindRibbonExtraSamplers(void* gxDev, const uint8_t* emitter)
     {
-        const void* const* arr = *reinterpret_cast<const void* const* const*>(emitter + m2off::kOffRibbonTexHandlePtr);
+        const void* const* arr = reinterpret_cast<const m2off::RibbonEmitter*>(emitter)->texHandles;
         if (!arr) return false;
         void* h1 = const_cast<void*>(arr[1]);
         void* h2 = const_cast<void*>(arr[2]);
@@ -243,7 +242,7 @@ namespace
         {
             __try
             {
-                layerCountPtr = reinterpret_cast<uint32_t*>(emitter + m2off::kOffRibbonLayerCount);
+                layerCountPtr = &reinterpret_cast<m2off::RibbonEmitter*>(emitter)->layerCount;
                 uint32_t layers = *layerCountPtr;
 
                 bool useMulti = false;

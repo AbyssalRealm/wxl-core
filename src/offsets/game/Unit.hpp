@@ -47,4 +47,26 @@ namespace wxl::offsets::game::unit
                                                const char* tag, int flag);
     using ActivePlayerGuidFn = unsigned long long(__cdecl*)();
     using ReactionFn         = int(__fastcall*)(void* self, void* edx, void* other);
+
+    // --- typed views over the objects above ---
+    // The constants are the curated landmarks; these structs give named, typed access to the same fields,
+    // with every member offset checked against a constant at compile time (a wrong padding fails the build).
+    // Only RE'd fields are named; the gaps are explicit padding. Pointers are 4 bytes on the 32-bit client.
+#pragma pack(push, 1)
+    /** @brief Unit / world object: the body-model slot. */
+    struct UnitObject
+    {
+        uint8_t  _pad00[kUnitModelField];
+        void*    model;            // kUnitModelField -> body model
+    };
+    static_assert(offsetof(UnitObject, model) == kUnitModelField, "UnitObject.model");
+
+    /** @brief Model object: the parent slot in the attachment chain. */
+    struct ModelObject
+    {
+        uint8_t  _pad00[kModelParentField];
+        void*    parent;           // kModelParentField -> parent model (0 = root)
+    };
+    static_assert(offsetof(ModelObject, parent) == kModelParentField, "ModelObject.parent");
+#pragma pack(pop)
 }

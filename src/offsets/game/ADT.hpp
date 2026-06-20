@@ -63,4 +63,40 @@ namespace wxl::offsets::game::adt
     // CMapChunk::Build: native this-in-ECX (__thiscall, ret 8). Declared __fastcall with a dummy EDX so the
     // trampoline routes the chunk into the this-register and keeps the two stack args.
     using Map_ChunkBuildFn = void(__fastcall*)(void* chunk, void* edx, void* rawMcnk, int param2);
+
+    // --- typed views over the objects above ---
+    // The constants are the curated landmarks; these structs give named, typed access to the same fields,
+    // with every member offset checked against a constant at compile time (a wrong padding fails the build).
+    // Only RE'd fields are named; the gaps are explicit padding. Pointers are 4 bytes on the 32-bit client.
+#pragma pack(push, 1)
+    /** @brief Tile-area object (one per resident map tile): async-read state and file buffer slots. */
+    struct TileArea
+    {
+        uint8_t  _pad00[kOffTileAsyncRead];
+        uint32_t asyncRead;        // kOffTileAsyncRead (non-zero while the root read is in flight)
+        uint8_t  _pad74[kOffTileFileBuffer - (kOffTileAsyncRead + sizeof(uint32_t))];
+        void*    fileBuffer;       // kOffTileFileBuffer (non-zero once the file buffer is allocated)
+    };
+    static_assert(offsetof(TileArea, asyncRead)  == kOffTileAsyncRead,  "TileArea.asyncRead");
+    static_assert(offsetof(TileArea, fileBuffer) == kOffTileFileBuffer, "TileArea.fileBuffer");
+
+    /** @brief Runtime chunk object (CMapChunk): draw-node layer count and the MCNK data-header pointer. */
+    struct MapChunk
+    {
+        uint8_t  _pad00[kOffChunkNodeLayerCount];
+        uint8_t  nodeLayerCount;   // kOffChunkNodeLayerCount (draw-node layer count)
+        uint8_t  _pad0a[kOffChunkMcnkHeader - (kOffChunkNodeLayerCount + sizeof(uint8_t))];
+        void*    mcnkHeader;       // kOffChunkMcnkHeader -> McnkHeader (raw MCNK ptr + 8-byte tag)
+    };
+    static_assert(offsetof(MapChunk, nodeLayerCount) == kOffChunkNodeLayerCount, "MapChunk.nodeLayerCount");
+    static_assert(offsetof(MapChunk, mcnkHeader)     == kOffChunkMcnkHeader,     "MapChunk.mcnkHeader");
+
+    /** @brief MCNK 128-byte data header (chunk->mcnkHeader): the authoritative texture-layer count. */
+    struct McnkHeader
+    {
+        uint8_t  _pad00[kOffMcnkNLayers];
+        uint32_t nLayers;          // kOffMcnkNLayers (SMChunk.nLayers, 0..4)
+    };
+    static_assert(offsetof(McnkHeader, nLayers) == kOffMcnkNLayers, "McnkHeader.nLayers");
+#pragma pack(pop)
 }

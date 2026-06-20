@@ -88,4 +88,60 @@ namespace wxl::offsets::game::wmo
     using Wmo_FrustumAabbTestFn = uint32_t(__fastcall*)(void* frustum, void* edx, void* bbox);
     using Wmo_HorizonAabbTestFn = uint32_t(__cdecl*)(void* bbox, uint32_t mode);
     using Wmo_CameraInGroupTestFn = uint32_t(__fastcall*)(void* root, void* edx, float* camA, float* camB, uint32_t groupIndex);
+
+    // --- typed views over the objects above ---
+    // The constants are the curated landmarks; these structs give named, typed access to the same fields,
+    // with every member offset checked against a constant at compile time (a wrong padding fails the build).
+    // Only RE'd fields are named; the gaps are explicit padding. Pointers are 4 bytes on the 32-bit client.
+#pragma pack(push, 1)
+    /** @brief Map-object root: the parsed root object that owns the material table and the group array. */
+    struct Root
+    {
+        uint8_t  _pad00[kOffNameInline];
+        char     nameInline[kOffMogiTable - kOffNameInline]; // kOffNameInline (inline NUL-terminated path)
+        void*    mogiTable;        // kOffMogiTable -> per-group bbox table (stride kMogiStride)
+        uint8_t  _pad134[kOffMaterialBase - (kOffMogiTable + sizeof(void*))];
+        void*    materialBase;     // kOffMaterialBase -> material-record base
+        uint8_t  _pad164[kOffMaterialCount - (kOffMaterialBase + sizeof(void*))];
+        uint32_t materialCount;    // kOffMaterialCount
+        uint8_t  _pad1a0[kOffRootBuffer - (kOffMaterialCount + sizeof(uint32_t))];
+        void*    rootBuffer;       // kOffRootBuffer -> root file buffer
+        uint32_t rootSize;         // kOffRootSize (root buffer byte size)
+        uint8_t  _pad1d4[kOffGroupCount - (kOffRootSize + sizeof(uint32_t))];
+        uint32_t groupCount;       // kOffGroupCount (the group-array bound)
+        void*    groupArray[1];    // kOffGroupArray (group runtime objects, stride 4)
+    };
+    static_assert(offsetof(Root, nameInline)    == kOffNameInline,    "Root.nameInline");
+    static_assert(offsetof(Root, mogiTable)     == kOffMogiTable,     "Root.mogiTable");
+    static_assert(offsetof(Root, materialBase)  == kOffMaterialBase,  "Root.materialBase");
+    static_assert(offsetof(Root, materialCount) == kOffMaterialCount, "Root.materialCount");
+    static_assert(offsetof(Root, rootBuffer)    == kOffRootBuffer,    "Root.rootBuffer");
+    static_assert(offsetof(Root, rootSize)      == kOffRootSize,      "Root.rootSize");
+    static_assert(offsetof(Root, groupCount)    == kOffGroupCount,    "Root.groupCount");
+    static_assert(offsetof(Root, groupArray)    == kOffGroupArray,    "Root.groupArray");
+
+    /** @brief Map-object group: a runtime group object holding its file buffer and a back pointer to the root. */
+    struct Group
+    {
+        uint8_t  _pad00[kOffGroupBuffer];
+        void*    groupBuffer;      // kOffGroupBuffer -> group file buffer
+        uint32_t groupSize;        // kOffGroupSize (group buffer byte size)
+        void*    root;             // kOffGroupRoot -> parent root object
+    };
+    static_assert(offsetof(Group, groupBuffer) == kOffGroupBuffer, "Group.groupBuffer");
+    static_assert(offsetof(Group, groupSize)   == kOffGroupSize,   "Group.groupSize");
+    static_assert(offsetof(Group, root)        == kOffGroupRoot,   "Group.root");
+
+    /** @brief Group-info entry (root->mogiTable + i * kMogiStride): the per-group world AABB. */
+    struct MogiEntry
+    {
+        uint8_t  _pad00[kOffMogiBbox];
+        float    bboxMin[3];       // kOffMogiBbox (bbox min)
+        float    bboxMax[3];       // bbox max (+0x10 within an entry)
+    };
+    static_assert(offsetof(MogiEntry, bboxMin)     == kOffMogiBbox,       "MogiEntry.bboxMin");
+    static_assert(offsetof(MogiEntry, bboxMax)     == kOffMogiBbox + 0xC, "MogiEntry.bboxMax");
+    static_assert(offsetof(MogiEntry, bboxMin) + 0xC == kOffMogiBbox + 0x10 - sizeof(float), "MogiEntry.bbox.layout");
+    static_assert(sizeof(MogiEntry) <= kMogiStride, "MogiEntry fits stride");
+#pragma pack(pop)
 }

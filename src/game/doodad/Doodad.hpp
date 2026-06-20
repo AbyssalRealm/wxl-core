@@ -132,7 +132,11 @@ namespace wxl::game::doodad
      * @return The render instance, or null while the model is still loading. The live world matrix the
      *         renderer reads each frame lives on this instance, not the doodad.
      */
-    inline void* Instance(void* d) { return detail::P(d, off::kInstance); }
+    inline void* Instance(void* d)
+    {
+        if (!detail::Readable(d, off::kInstance + sizeof(void*))) return nullptr;
+        return static_cast<off::MapDoodad*>(d)->instance;
+    }
 
     /**
      * @brief Copies the model file name of a placed doodad into out.
@@ -152,7 +156,7 @@ namespace wxl::game::doodad
         if (!inst) return false;
         void* model = detail::P(inst, off::kInstModel);
         if (!model) return false;
-        const char* path = reinterpret_cast<const char*>(model) + off::kModelFullPath;
+        const char* path = static_cast<off::M2ModelCache*>(model)->fullPath;
         if (!detail::Readable(path, 1)) return false;
         // Find the last path separator so we show just the file name.
         const char* name = path;
@@ -247,9 +251,8 @@ namespace wxl::game::doodad
     inline void Position(void* d, float out[3])
     {
         if (!detail::Readable(d, off::kScale + sizeof(float))) { out[0] = out[1] = out[2] = 0.0f; return; }
-        out[0] = *detail::F(d, off::kPosX);
-        out[1] = *detail::F(d, off::kPosY);
-        out[2] = *detail::F(d, off::kPosZ);
+        const auto* dd = static_cast<const off::MapDoodad*>(d);
+        out[0] = dd->pos[0]; out[1] = dd->pos[1]; out[2] = dd->pos[2];
     }
 
     /**
@@ -259,7 +262,7 @@ namespace wxl::game::doodad
      */
     inline float Scale(void* d)
     {
-        return detail::Readable(d, off::kScale + sizeof(float)) ? *detail::F(d, off::kScale) : 1.0f;
+        return detail::Readable(d, off::kScale + sizeof(float)) ? static_cast<const off::MapDoodad*>(d)->scale : 1.0f;
     }
 
     /**
@@ -274,9 +277,10 @@ namespace wxl::game::doodad
         Position(d, pos);
         if (detail::Readable(d, off::kCenterZ + sizeof(float)))
         {
-            const float c0 = *detail::F(d, off::kCenterX);
-            const float c1 = *detail::F(d, off::kCenterY);
-            const float c2 = *detail::F(d, off::kCenterZ);
+            const auto* dd = static_cast<const off::MapDoodad*>(d);
+            const float c0 = dd->center[0];
+            const float c1 = dd->center[1];
+            const float c2 = dd->center[2];
             const float dx = c0 - pos[0], dy = c1 - pos[1], dz = c2 - pos[2];
             if (detail::SaneCoord(c0) && detail::SaneCoord(c1) && detail::SaneCoord(c2) &&
                 dx * dx + dy * dy + dz * dz < 300.0f * 300.0f)
@@ -297,8 +301,9 @@ namespace wxl::game::doodad
     inline bool BBox(void* d, float mn[3], float mx[3])
     {
         if (!detail::Readable(d, off::kBBoxMaxZ + sizeof(float))) return false;
-        mn[0] = *detail::F(d, off::kBBoxMinX); mn[1] = *detail::F(d, off::kBBoxMinY); mn[2] = *detail::F(d, off::kBBoxMinZ);
-        mx[0] = *detail::F(d, off::kBBoxMaxX); mx[1] = *detail::F(d, off::kBBoxMaxY); mx[2] = *detail::F(d, off::kBBoxMaxZ);
+        const auto* dd = static_cast<const off::MapDoodad*>(d);
+        mn[0] = dd->bboxMin[0]; mn[1] = dd->bboxMin[1]; mn[2] = dd->bboxMin[2];
+        mx[0] = dd->bboxMax[0]; mx[1] = dd->bboxMax[1]; mx[2] = dd->bboxMax[2];
         return true;
     }
 
@@ -321,12 +326,11 @@ namespace wxl::game::doodad
         if (!model) return false;
         void* hdr = detail::P(model, off::kModelHeader);
         if (!hdr) return false;
-        if (!detail::Readable(detail::F(hdr, off::kHdrBBoxMinX),
-                              (off::kHdrBBoxMaxZ - off::kHdrBBoxMinX) + sizeof(float)))
-            return false;
+        if (!detail::Readable(hdr, sizeof(off::MD20Header))) return false;
 
-        lo[0] = *detail::F(hdr, off::kHdrBBoxMinX); lo[1] = *detail::F(hdr, off::kHdrBBoxMinY); lo[2] = *detail::F(hdr, off::kHdrBBoxMinZ);
-        hi[0] = *detail::F(hdr, off::kHdrBBoxMaxX); hi[1] = *detail::F(hdr, off::kHdrBBoxMaxY); hi[2] = *detail::F(hdr, off::kHdrBBoxMaxZ);
+        const auto* h = static_cast<const off::MD20Header*>(hdr);
+        lo[0] = h->bboxMin[0]; lo[1] = h->bboxMin[1]; lo[2] = h->bboxMin[2];
+        hi[0] = h->bboxMax[0]; hi[1] = h->bboxMax[1]; hi[2] = h->bboxMax[2];
 
         float span = 0.0f;
         for (int i = 0; i < 3; ++i)
@@ -350,9 +354,9 @@ namespace wxl::game::doodad
     {
         void* inst = Instance(d);
         if (!inst) return false;
-        const float* src = detail::F(inst, off::kInstWorldMatrix);
-        if (!detail::Readable(src, 16 * sizeof(float))) return false;
-        for (int i = 0; i < 16; ++i) m[i] = src[i];
+        const auto* in = static_cast<const off::M2Instance*>(inst);
+        if (!detail::Readable(in->worldMatrix, 16 * sizeof(float))) return false;
+        for (int i = 0; i < 16; ++i) m[i] = in->worldMatrix[i];
         return true;
     }
 
@@ -367,17 +371,19 @@ namespace wxl::game::doodad
      */
     inline void SetWorldMatrix(void* d, const float m[16])
     {
-        void* inst = Instance(d);
-        if (inst && detail::Writable(detail::F(inst, off::kInstWorldMatrix), 16 * sizeof(float)))
-            for (int i = 0; i < 16; ++i) detail::F(inst, off::kInstWorldMatrix)[i] = m[i];
-
-        if (detail::Writable(detail::F(d, off::kWorldMatrix), 16 * sizeof(float)))
-            for (int i = 0; i < 16; ++i) detail::F(d, off::kWorldMatrix)[i] = m[i];
-        if (detail::Writable(detail::F(d, off::kPosX), 3 * sizeof(float)))
+        if (void* inst = Instance(d))
         {
-            *detail::F(d, off::kPosX) = m[12];
-            *detail::F(d, off::kPosY) = m[13];
-            *detail::F(d, off::kPosZ) = m[14];
+            auto* in = static_cast<off::M2Instance*>(inst);
+            if (detail::Writable(in->worldMatrix, 16 * sizeof(float)))
+                for (int i = 0; i < 16; ++i) in->worldMatrix[i] = m[i];
+        }
+
+        auto* dd = static_cast<off::MapDoodad*>(d);
+        if (detail::Writable(dd->worldMatrix, 16 * sizeof(float)))
+            for (int i = 0; i < 16; ++i) dd->worldMatrix[i] = m[i];
+        if (detail::Writable(dd->pos, 3 * sizeof(float)))
+        {
+            dd->pos[0] = m[12]; dd->pos[1] = m[13]; dd->pos[2] = m[14];
         }
     }
 
@@ -390,24 +396,22 @@ namespace wxl::game::doodad
      */
     inline void SetPosition(void* d, const float p[3])
     {
-        void* inst = Instance(d);
-        if (inst && detail::Writable(detail::F(inst, off::kInstTransX), 3 * sizeof(float)))
+        if (void* inst = Instance(d))
         {
-            *detail::F(inst, off::kInstTransX) = p[0];
-            *detail::F(inst, off::kInstTransY) = p[1];
-            *detail::F(inst, off::kInstTransZ) = p[2];
+            auto* in = static_cast<off::M2Instance*>(inst);
+            if (detail::Writable(in->worldMatrix + 12, 3 * sizeof(float)))
+            {
+                in->worldMatrix[12] = p[0]; in->worldMatrix[13] = p[1]; in->worldMatrix[14] = p[2];
+            }
         }
-        if (detail::Writable(detail::F(d, off::kPosX), 3 * sizeof(float)))
+        auto* dd = static_cast<off::MapDoodad*>(d);
+        if (detail::Writable(dd->pos, 3 * sizeof(float)))
         {
-            *detail::F(d, off::kPosX) = p[0];
-            *detail::F(d, off::kPosY) = p[1];
-            *detail::F(d, off::kPosZ) = p[2];
+            dd->pos[0] = p[0]; dd->pos[1] = p[1]; dd->pos[2] = p[2];
         }
-        if (detail::Writable(detail::F(d, off::kWorldMatrixTransX), 3 * sizeof(float)))
+        if (detail::Writable(dd->worldMatrix + 12, 3 * sizeof(float)))
         {
-            *detail::F(d, off::kWorldMatrixTransX) = p[0];
-            *detail::F(d, off::kWorldMatrixTransY) = p[1];
-            *detail::F(d, off::kWorldMatrixTransZ) = p[2];
+            dd->worldMatrix[12] = p[0]; dd->worldMatrix[13] = p[1]; dd->worldMatrix[14] = p[2];
         }
     }
 

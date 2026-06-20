@@ -36,6 +36,35 @@ namespace wxl::offsets::engine::gx
     constexpr uintptr_t kDrawTriangleBatch      = 0x008203B0;
     constexpr size_t    kDrawBatchCtxModelField = 0x60; // draw context -> current model
 
+    // --- typed views over the device objects ---
+    // The constants above are the curated landmarks; these structs give named, typed access to the same
+    // fields, with every member offset checked against a constant at compile time. Only RE'd fields are
+    // named; the gaps are explicit padding. Pointers are 4 bytes on the 32-bit client. The graphics-device
+    // singleton pointer, the vtable indices, the function addresses, and the render-state ids stay as plain
+    // constants: they are not struct fields.
+#pragma pack(push, 1)
+    /** @brief Graphics-device object (the kGxDevicePtr target): the live D3D device and cached surfaces. */
+    struct GxDevice
+    {
+        uint8_t  _pad0000[kD3DDeviceField];
+        void*    d3dDevice;        // kD3DDeviceField -> IDirect3DDevice9*
+        uint8_t  _pad3980[kBackBufferField - (kD3DDeviceField + sizeof(void*))];
+        void*    backBuffer;       // kBackBufferField (cached back-buffer surface)
+        void*    depthSurface;     // kDepthSurfaceField (cached world depth surface)
+    };
+    static_assert(offsetof(GxDevice, d3dDevice)    == kD3DDeviceField,   "GxDevice.d3dDevice");
+    static_assert(offsetof(GxDevice, backBuffer)   == kBackBufferField,  "GxDevice.backBuffer");
+    static_assert(offsetof(GxDevice, depthSurface) == kDepthSurfaceField, "GxDevice.depthSurface");
+
+    /** @brief M2 triangle-batch draw context (this-in-ECX at kDrawTriangleBatch). */
+    struct DrawBatchContext
+    {
+        uint8_t  _pad00[kDrawBatchCtxModelField];
+        void*    model;            // kDrawBatchCtxModelField -> current model
+    };
+    static_assert(offsetof(DrawBatchContext, model) == kDrawBatchCtxModelField, "DrawBatchContext.model");
+#pragma pack(pop)
+
     // World-frame finalize render callback (AURENDERCALLBACK), once per frame. Hook its ENTRY and fire the
     // event AFTER the original returns = world done, UI not yet started. The world -> UI boundary / post-fx
     // slot. (The interior address 0x004FB074 is mid-epilogue, NOT a hookable entry; kept only as an anchor.)

@@ -87,6 +87,14 @@ Output: `WarcraftXL.dll`. Vendored dependencies build with the project.
 > Modifying a client binary is on you: work on a **copy**, keep an untouched backup, and only point
 > this at a client and server you are permitted to modify and connect to.
 
+## Contributors
+
+Thanks to everyone who has helped shape WarcraftXL, with code, reverse-engineering, ideas, or feedback:
+
+- [Furioz](https://github.com/Furioz420)
+- [Tester](https://github.com/testertester)
+- [Duskhaven](https://github.com/Duskhaven-Reforged)
+
 ## Support
 
 **WarcraftXL is free, and it always will be - forever.** Nothing here is gated, and nothing ever

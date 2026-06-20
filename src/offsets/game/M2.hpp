@@ -152,6 +152,137 @@ namespace wxl::offsets::game::m2
     constexpr size_t kOffRibbonLayerCount   = 0x118; // draw-loop bound
     constexpr size_t kOffRibbonTexHandlePtr = 0x12C; // -> per-layer texture-handle array (stride 4)
 
+    // --- typed views over the objects above ---
+    // The constants are the curated landmarks; these structs give named, typed access to the same fields,
+    // with every member offset checked against a constant at compile time (a wrong padding fails the build).
+    // Only RE'd fields are named; the gaps are explicit padding. Pointers are 4 bytes on the 32-bit client.
+#pragma pack(push, 1)
+    /** @brief I/O record read by the per-sequence rebase: the loaded buffer base and its byte size. */
+    struct IoRecord
+    {
+        uint8_t  _pad00[kOffRecordBuffer];
+        void*    buffer;           // kOffRecordBuffer (loaded bytes base)
+        uint32_t size;             // kOffRecordSize (byte count)
+    };
+    static_assert(offsetof(IoRecord, buffer) == kOffRecordBuffer, "IoRecord.buffer");
+    static_assert(offsetof(IoRecord, size)   == kOffRecordSize,   "IoRecord.size");
+
+    /** @brief Async load node: holds the I/O record pointer. */
+    struct LoadNode
+    {
+        uint8_t  _pad00[kOffNodeRecord];
+        void*    record;           // kOffNodeRecord -> IoRecord
+    };
+    static_assert(offsetof(LoadNode, record) == kOffNodeRecord, "LoadNode.record");
+
+    /** @brief SetupBatchAlpha draw context: the instance being drawn and the live material. */
+    struct DrawContext
+    {
+        uint8_t  _pad00[kOffDrawCtxInstance];
+        void*    instance;         // kOffDrawCtxInstance -> M2Instance
+        uint8_t  _pad64[kOffDrawCtxMaterial - (kOffDrawCtxInstance + sizeof(void*))];
+        void*    material;         // kOffDrawCtxMaterial -> Material
+    };
+    static_assert(offsetof(DrawContext, instance) == kOffDrawCtxInstance, "DrawContext.instance");
+    static_assert(offsetof(DrawContext, material) == kOffDrawCtxMaterial, "DrawContext.material");
+
+    /** @brief Live material record: the blend mode the draw uses to pick the alpha-test reference. */
+    struct Material
+    {
+        uint8_t  _pad00[kOffMaterialBlend];
+        uint16_t blend;            // kOffMaterialBlend (1 = alpha key)
+    };
+    static_assert(offsetof(Material, blend) == kOffMaterialBlend, "Material.blend");
+
+    /** @brief Runtime instance: the model it draws and the per-frame bone-matrix palette. */
+    struct M2Instance
+    {
+        uint8_t  _pad00[kOffInstModel];
+        void*    model;            // kOffInstModel -> M2Model
+        uint8_t  _pad30[kOffInstBonePalette - (kOffInstModel + sizeof(void*))];
+        float    bonePalette[1];   // kOffInstBonePalette (bone matrices, row-major 4x4, kBonePaletteStride each)
+    };
+    static_assert(offsetof(M2Instance, model)       == kOffInstModel,       "M2Instance.model");
+    static_assert(offsetof(M2Instance, bonePalette) == kOffInstBonePalette, "M2Instance.bonePalette");
+
+    /** @brief Runtime model: flags, path stem, the parsed .m2 buffer, its size, and the live skin profile. */
+    struct M2Model
+    {
+        uint8_t  _pad00[kOffModelFlags];
+        uint32_t flags;            // kOffModelFlags (bit 2 selects the sibling-file open flag)
+        uint8_t  _pad0c[kOffModelPathStem - (kOffModelFlags + sizeof(uint32_t))];
+        char     pathStem[kOffModelHeader - kOffModelPathStem]; // kOffModelPathStem (inline path stem, no extension)
+        void*    header;           // kOffModelHeader -> raw .m2 file buffer (parsed in place)
+        uint8_t  _pad154[kOffModelFileSize - (kOffModelHeader + sizeof(void*))];
+        uint32_t fileSize;         // kOffModelFileSize (byte size of the buffer at kOffModelHeader)
+        void*    skin;             // kOffModelSkin -> live parsed skin profile
+    };
+    static_assert(offsetof(M2Model, flags)    == kOffModelFlags,    "M2Model.flags");
+    static_assert(offsetof(M2Model, pathStem) == kOffModelPathStem, "M2Model.pathStem");
+    static_assert(offsetof(M2Model, header)   == kOffModelHeader,   "M2Model.header");
+    static_assert(offsetof(M2Model, fileSize) == kOffModelFileSize, "M2Model.fileSize");
+    static_assert(offsetof(M2Model, skin)     == kOffModelSkin,     "M2Model.skin");
+
+    /** @brief Parsed file header: the global flags and the post-fixup bone array. */
+    struct M2FileHeader
+    {
+        uint8_t  _pad00[kOffHdrGlobalFlags];
+        uint32_t globalFlags;      // kOffHdrGlobalFlags (bit 0x20 = model carries physics)
+        uint8_t  _pad14[kOffHdrBoneCount - (kOffHdrGlobalFlags + sizeof(uint32_t))];
+        uint32_t boneCount;        // kOffHdrBoneCount
+        void*    boneArray;        // kOffHdrBoneArray -> M2Bone records (post-fixup data ptr)
+    };
+    static_assert(offsetof(M2FileHeader, globalFlags) == kOffHdrGlobalFlags, "M2FileHeader.globalFlags");
+    static_assert(offsetof(M2FileHeader, boneCount)   == kOffHdrBoneCount,   "M2FileHeader.boneCount");
+    static_assert(offsetof(M2FileHeader, boneArray)   == kOffHdrBoneArray,   "M2FileHeader.boneArray");
+
+    /** @brief Bone record in the header bone array (stride kBoneStride). */
+    struct M2Bone
+    {
+        uint8_t  _pad00[kOffBoneFlags];
+        uint32_t flags;            // kOffBoneFlags
+        int16_t  parent;           // kOffBoneParent (0xFFFF = root)
+        uint8_t  _pad0a[kOffBonePivot - (kOffBoneParent + sizeof(int16_t))];
+        float    pivot[3];         // kOffBonePivot (bone origin in bind space)
+    };
+    static_assert(offsetof(M2Bone, flags)  == kOffBoneFlags,  "M2Bone.flags");
+    static_assert(offsetof(M2Bone, parent) == kOffBoneParent, "M2Bone.parent");
+    static_assert(offsetof(M2Bone, pivot)  == kOffBonePivot,  "M2Bone.pivot");
+
+    /** @brief Track object read by the evaluators: the timestamp and value sub-arrays (count + ptr each). */
+    struct M2Track
+    {
+        uint8_t   _pad00[kOffTrackTimestampsCount];
+        uint32_t  timestampsCount; // kOffTrackTimestampsCount
+        void*     timestampsPtr;   // kOffTrackTimestampsPtr
+        uint32_t  valuesCount;     // kOffTrackValuesCount
+        void*     valuesPtr;       // kOffTrackValuesPtr
+    };
+    static_assert(offsetof(M2Track, timestampsCount) == kOffTrackTimestampsCount, "M2Track.timestampsCount");
+    static_assert(offsetof(M2Track, timestampsPtr)   == kOffTrackTimestampsPtr,   "M2Track.timestampsPtr");
+    static_assert(offsetof(M2Track, valuesCount)     == kOffTrackValuesCount,     "M2Track.valuesCount");
+    static_assert(offsetof(M2Track, valuesPtr)       == kOffTrackValuesPtr,       "M2Track.valuesPtr");
+
+    /** @brief Runtime bone state: the current animation index used to pick the per-animation inner slot. */
+    struct RuntimeBone
+    {
+        uint8_t  _pad00[kOffRuntimeBoneAnimIdx];
+        uint32_t animIndex;        // kOffRuntimeBoneAnimIdx
+    };
+    static_assert(offsetof(RuntimeBone, animIndex) == kOffRuntimeBoneAnimIdx, "RuntimeBone.animIndex");
+
+    /** @brief Ribbon emitter: the draw-loop layer count and the per-layer texture-handle array pointer. */
+    struct RibbonEmitter
+    {
+        uint8_t  _pad00[kOffRibbonLayerCount];
+        uint32_t layerCount;       // kOffRibbonLayerCount (draw-loop bound)
+        uint8_t  _pad11c[kOffRibbonTexHandlePtr - (kOffRibbonLayerCount + sizeof(uint32_t))];
+        void**   texHandles;       // kOffRibbonTexHandlePtr -> per-layer texture-handle array (stride 4)
+    };
+    static_assert(offsetof(RibbonEmitter, layerCount) == kOffRibbonLayerCount,   "RibbonEmitter.layerCount");
+    static_assert(offsetof(RibbonEmitter, texHandles) == kOffRibbonTexHandlePtr, "RibbonEmitter.texHandles");
+#pragma pack(pop)
+
     // --- signatures ---
     // Model init / skin finalize: native this-in-ECX; declared with a dummy second parameter so the
     // trampoline routes the model into the this-register.

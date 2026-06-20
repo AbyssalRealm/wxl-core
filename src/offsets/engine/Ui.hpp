@@ -27,4 +27,18 @@ namespace wxl::offsets::engine::ui
     constexpr uintptr_t kUiRootPtr = 0x00B499A8;
     // int field on the root: 1 = UI shown, 0 = UI hidden. Initialized to 1.
     constexpr size_t    kUiEnabledFlag = 0x124C;
+
+    // --- typed view over the interface root object ---
+    // The constants above are the curated landmarks; this struct gives named, typed access to the same
+    // field, with the member offset checked against the constant at compile time. Only the RE'd field is
+    // named; the lead-in is explicit padding.
+#pragma pack(push, 1)
+    /** @brief Interface root object (the kUiRootPtr target). */
+    struct UiRoot
+    {
+        uint8_t  _pad00[kUiEnabledFlag];
+        int32_t  enabled;          // kUiEnabledFlag (1 = UI shown, 0 = UI hidden)
+    };
+    static_assert(offsetof(UiRoot, enabled) == kUiEnabledFlag, "UiRoot.enabled");
+#pragma pack(pop)
 }

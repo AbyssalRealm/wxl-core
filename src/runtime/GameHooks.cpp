@@ -92,10 +92,11 @@ namespace
         uint16_t blend = 0;
         __try
         {
-            void* inst = *reinterpret_cast<void**>(reinterpret_cast<char*>(ctx) + m2::kOffDrawCtxInstance);
-            void* mat  = *reinterpret_cast<void**>(reinterpret_cast<char*>(ctx) + m2::kOffDrawCtxMaterial);
-            if (inst) model = *reinterpret_cast<void**>(reinterpret_cast<char*>(inst) + m2::kOffInstModel);
-            if (mat)  blend = *reinterpret_cast<uint16_t*>(reinterpret_cast<char*>(mat) + m2::kOffMaterialBlend);
+            auto* dc   = static_cast<m2::DrawContext*>(ctx);
+            void* inst = dc->instance;
+            void* mat  = dc->material;
+            if (inst) model = static_cast<m2::M2Instance*>(inst)->model;
+            if (mat)  blend = static_cast<m2::Material*>(mat)->blend;
         }
         __except (EXCEPTION_EXECUTE_HANDLER) { model = nullptr; }
 
@@ -153,8 +154,8 @@ namespace
     {
         g_origChunkBuild(chunk, edx, rawMcnk, param2);
         uint32_t layers = 0;
-        void* header = *reinterpret_cast<void**>(reinterpret_cast<char*>(chunk) + adt::kOffChunkMcnkHeader);
-        if (header) layers = *reinterpret_cast<uint32_t*>(reinterpret_cast<char*>(header) + adt::kOffMcnkNLayers);
+        void* header = static_cast<adt::MapChunk*>(chunk)->mcnkHeader;
+        if (header) layers = static_cast<adt::McnkHeader*>(header)->nLayers;
         ev::AdtChunkArgs a{ chunk, layers };
         ev::Emit(ev::Event::OnAdtChunkBuild, &a);
     }

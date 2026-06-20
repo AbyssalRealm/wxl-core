@@ -68,9 +68,10 @@ namespace wxl::game::gx
      */
     inline void* RawDevice()
     {
+        // kGxDevicePtr is a fixed-address global slot; the deref reads the graphics-device object.
         void* g = *reinterpret_cast<void**>(off::kGxDevicePtr);
         if (!g) return nullptr;
-        return *reinterpret_cast<void**>(reinterpret_cast<char*>(g) + off::kD3DDeviceField);
+        return static_cast<off::GxDevice*>(g)->d3dDevice;
     }
 
     /**

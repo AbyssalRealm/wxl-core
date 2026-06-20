@@ -34,7 +34,7 @@ namespace wxl::game::unit
      * @return The body model, or null.
      */
     inline void* Model(void* unit)
-    { return unit ? *reinterpret_cast<void**>(reinterpret_cast<char*>(unit) + off::kUnitModelField) : nullptr; }
+    { return unit ? static_cast<off::UnitObject*>(unit)->model : nullptr; }
 
     /**
      * @brief Reads a model's parent in the attachment chain.
@@ -42,7 +42,7 @@ namespace wxl::game::unit
      * @return The parent model, or null at the root.
      */
     inline void* ModelParent(void* model)
-    { return model ? *reinterpret_cast<void**>(reinterpret_cast<char*>(model) + off::kModelParentField) : nullptr; }
+    { return model ? static_cast<off::ModelObject*>(model)->parent : nullptr; }
 
     /**
      * @brief Reads the reaction of self toward other.

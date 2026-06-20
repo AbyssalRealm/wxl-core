@@ -34,4 +34,18 @@ namespace wxl::offsets::engine::sound
     // Sound-group array pointer; the first group's field at +0x08 holds the live master-volume float.
     constexpr uintptr_t kSoundGroupArrayPtr  = 0x00D438FC;
     constexpr size_t    kOffGroupMasterVolume = 0x08;
+
+    // --- typed view over a sound-group record ---
+    // The constants above are the curated landmarks; this struct gives named, typed access to the same
+    // field, with the member offset checked against the constant at compile time. Only the RE'd field is
+    // named; the lead-in is explicit padding.
+#pragma pack(push, 1)
+    /** @brief Sound-group record (an element of the kSoundGroupArrayPtr target). */
+    struct SoundGroup
+    {
+        uint8_t  _pad00[kOffGroupMasterVolume];
+        float    masterVolume;     // kOffGroupMasterVolume (live master volume, 0..1)
+    };
+    static_assert(offsetof(SoundGroup, masterVolume) == kOffGroupMasterVolume, "SoundGroup.masterVolume");
+#pragma pack(pop)
 }

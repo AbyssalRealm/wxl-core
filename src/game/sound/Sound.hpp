@@ -51,8 +51,9 @@ namespace wxl::game::sound
     inline float MasterVolume()
     {
         if (!Available()) return 1.0f;
-        char* group0 = *reinterpret_cast<char**>(off::kSoundGroupArrayPtr);
+        // kSoundGroupArrayPtr is a fixed-address global slot; the deref reads the first group record.
+        void* group0 = *reinterpret_cast<void**>(off::kSoundGroupArrayPtr);
         if (!group0) return 1.0f;
-        return *reinterpret_cast<float*>(group0 + off::kOffGroupMasterVolume);
+        return static_cast<off::SoundGroup*>(group0)->masterVolume;
     }
 }

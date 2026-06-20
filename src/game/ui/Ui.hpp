@@ -36,8 +36,9 @@ namespace wxl::game::ui
      */
     inline int* Flag()
     {
+        // kUiRootPtr is a fixed-address global slot; the deref reads the live root object pointer.
         void* root = *reinterpret_cast<void**>(off::kUiRootPtr);
-        return root ? reinterpret_cast<int*>(reinterpret_cast<char*>(root) + off::kUiEnabledFlag) : nullptr;
+        return root ? &static_cast<off::UiRoot*>(root)->enabled : nullptr;
     }
 
     /**

@@ -59,7 +59,7 @@ namespace wxl::game::wmo
     {
         if (!root)
             return nullptr;
-        return *reinterpret_cast<void**>(reinterpret_cast<char*>(root) + off::kOffRootBuffer);
+        return static_cast<off::Root*>(root)->rootBuffer;
     }
 
     /**
@@ -71,7 +71,7 @@ namespace wxl::game::wmo
     {
         if (!root)
             return 0;
-        return *reinterpret_cast<uint32_t*>(reinterpret_cast<char*>(root) + off::kOffGroupCount);
+        return static_cast<off::Root*>(root)->groupCount;
     }
 
     /**
@@ -84,8 +84,7 @@ namespace wxl::game::wmo
     {
         if (!root || i >= GroupCount(root))
             return nullptr;
-        char* base = reinterpret_cast<char*>(root) + off::kOffGroupArray;
-        return *reinterpret_cast<void**>(base + i * 4);
+        return static_cast<off::Root*>(root)->groupArray[i];
     }
 
     /** @brief Adds the WMO bindings to the enumerable catalog. */

@@ -72,14 +72,14 @@ namespace wxl::game::m2
      * @param model  the model object.
      * @return pointer to the in-memory .m2 file buffer.
      */
-    inline void*    FileBuffer(void* model) { return *reinterpret_cast<void**>   (reinterpret_cast<char*>(model) + off::kOffModelHeader); }
+    inline void*    FileBuffer(void* model) { return static_cast<off::M2Model*>(model)->header; }
 
     /**
      * @brief Returns the byte size of a model's raw .m2 file buffer.
      * @param model  the model object.
      * @return the buffer size in bytes.
      */
-    inline uint32_t FileSize  (void* model) { return *reinterpret_cast<uint32_t*>(reinterpret_cast<char*>(model) + off::kOffModelFileSize); }
+    inline uint32_t FileSize  (void* model) { return static_cast<off::M2Model*>(model)->fileSize; }
 
     /**
      * @brief Returns the parsed model header.
@@ -165,8 +165,9 @@ namespace wxl::game::m2
      */
     inline void ReplaceBuffer(void* model, void* buffer, uint32_t size)
     {
-        *reinterpret_cast<void**>   (reinterpret_cast<char*>(model) + off::kOffModelHeader)   = buffer;
-        *reinterpret_cast<uint32_t*>(reinterpret_cast<char*>(model) + off::kOffModelFileSize) = size;
+        auto* m = static_cast<off::M2Model*>(model);
+        m->header   = buffer;
+        m->fileSize = size;
     }
 
     /** @brief Adds the M2 bindings to the enumerable catalog. */
