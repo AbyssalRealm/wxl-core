@@ -65,6 +65,14 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
             COMMENT "Deploy WarcraftXL.dll -> ${CLIENT_PATH}")
     endif()
 
+    # Per-module CMake hook: a module may ship scripts/<m>/module.cmake to extend the WarcraftXL target
+    # (add a vendored library, extra include dirs, link libraries). The file runs with the target defined
+    # and ${CMAKE_CURRENT_LIST_DIR} pointing at the module folder. Optional; most modules need none.
+    file(GLOB WXL_MODULE_CMAKES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*/module.cmake")
+    foreach(_wxl_module ${WXL_MODULE_CMAKES})
+        include("${_wxl_module}")
+    endforeach()
+
     # =========================================================================
     # Target 2: wxl-patcher.exe  = the offline PE patcher + patcher scripts
     # =========================================================================
