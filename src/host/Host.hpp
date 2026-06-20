@@ -45,12 +45,16 @@ namespace wxl::host
     using ServedFn = void (*)(std::string_view name, std::span<const uint8_t> bytes, ServedOrigin origin);
     void RegisterServed(const char* name, ServedFn fn);
 
+    using HasFn = bool (*)(std::string_view name);
+    void RegisterHas(const char* name, HasFn fn);
+
     // --- pipeline entry points (called by the host serve loop, NOT by modules) ---
 
     bool Provide(std::string_view name, std::vector<uint8_t>& out);
     bool Transform(std::string_view name, std::span<const uint8_t> raw, std::vector<uint8_t>& out);
     bool Exists(std::string_view name);
     void NotifyServed(std::string_view name, std::span<const uint8_t> bytes, ServedOrigin origin);
+    bool Has(std::string_view name);
 
     // --- host environment (set by the host at startup; read by modules that read the archives themselves,
     //     e.g. the prefetch pool mounting its own per-thread MpqStore) ---
