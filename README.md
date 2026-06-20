@@ -93,7 +93,7 @@ Thanks to everyone who has helped shape WarcraftXL, with code, reverse-engineeri
 
 - [Furioz](https://github.com/Furioz420)
 - [Tester](https://github.com/testertester)
-- [Duskhaven](https://github.com/Duskhaven-Reforged)
+- [Duskhaven](https://git.duskhaven.net/Duskhaven)
 
 ## Support
 

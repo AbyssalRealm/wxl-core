@@ -19,6 +19,7 @@
 #include "core/Hook.hpp"
 #include "core/Logger.hpp"
 #include "events/Event.hpp"
+#include "offsets/engine/Frame.hpp"
 #include "offsets/engine/Gx.hpp"
 #include "offsets/game/ADT.hpp"
 #include "offsets/game/Doodad.hpp"
@@ -37,6 +38,7 @@ namespace
     namespace adt   = wxl::offsets::game::adt;
     namespace dd    = wxl::offsets::game::doodad;
     namespace wld   = wxl::offsets::game::world;
+    namespace frame = wxl::offsets::engine::frame;
 
     m2::M2_InitFn              g_origM2Init       = nullptr;
     m2::M2_FinalizeSkinFn      g_origFinalizeSkin = nullptr;
@@ -45,6 +47,7 @@ namespace
     gxoff::TextureUpdateFn     g_origTexUpdate    = nullptr;
     adt::Map_ChunkBuildFn      g_origChunkBuild   = nullptr;
     wld::World_EnterFn         g_origWorldEnter   = nullptr;
+    frame::FramePumpFn         g_origFramePump    = nullptr;
 
     /**
      * @brief Detours model init, emitting OnModelLoadPre at entry and OnModelLoad after parsing.
@@ -167,11 +170,24 @@ namespace
      */
     void __cdecl hkWorldEnter(int worldTime, int withLoadingScreen)
     {
-        ev::WorldLeaveArgs leave{ 0 };
+        const auto mapId = static_cast<uint32_t>(*reinterpret_cast<int32_t*>(wld::kCurrentMapId));
+        ev::WorldLeaveArgs leave{ mapId }; // old world still loaded: id is the one being left
         ev::Emit(ev::Event::OnWorldLeave, &leave);
         g_origWorldEnter(worldTime, withLoadingScreen);
-        ev::WorldEnterArgs enter{ 0 };
+        const auto entered = static_cast<uint32_t>(*reinterpret_cast<int32_t*>(wld::kCurrentMapId));
+        ev::WorldEnterArgs enter{ entered };
         ev::Emit(ev::Event::OnWorldEnter, &enter);
+    }
+
+    /**
+     * @brief Detours the master per-frame pump, emitting OnUpdate once per frame with the frame delta.
+     */
+    void __cdecl hkFramePump()
+    {
+        g_origFramePump();
+        ev::UpdateArgs a{ *reinterpret_cast<float*>(frame::kDeltaSeconds),
+                          *reinterpret_cast<uint32_t*>(frame::kFrameTimeMs) };
+        ev::Emit(ev::Event::OnUpdate, &a);
     }
 }
 
@@ -203,7 +219,10 @@ namespace wxl::runtime::game
         wxl::core::hook::Install("CWorldEnter", wld::kEnter,
                                  reinterpret_cast<void*>(&hkWorldEnter),
                                  reinterpret_cast<void**>(&g_origWorldEnter));
+        wxl::core::hook::Install("FramePump", frame::kFramePump,
+                                 reinterpret_cast<void*>(&hkFramePump),
+                                 reinterpret_cast<void**>(&g_origFramePump));
 
-        WLOG_INFO("game: hooks installed (M2Init, M2FinalizeSkin, M2SetupBatchAlpha, DoodadSpawn, TextureUpdate, ChunkBuild, CWorldEnter)");
+        WLOG_INFO("game: hooks installed (M2Init, M2FinalizeSkin, M2SetupBatchAlpha, DoodadSpawn, TextureUpdate, ChunkBuild, CWorldEnter, FramePump)");
     }
 }

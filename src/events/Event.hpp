@@ -32,12 +32,14 @@ namespace wxl::events
         OnM2SkinFinalize,// a model's skin profile is being finalized  (M2SkinFinalizeArgs)
         OnFrame,         // per-frame Present                          (FrameArgs)
         OnEndScene,      // end of the frame, before present           (EndSceneArgs)
+        OnUpdate,        // once-per-frame logic tick, with delta time (UpdateArgs)
         OnWorldRender,   // per-frame world draw pass                  (WorldRenderArgs)
         OnWorldRenderEnd,// world -> UI boundary, the post-fx slot     (WorldRenderEndArgs)
         OnM2BatchDraw,   // one M2 triangle batch is drawing           (M2BatchDrawArgs)
         OnM2SetupBatchAlpha, // an M2 batch's alpha/material is set up (M2SetupBatchAlphaArgs)
         OnRibbonDraw,    // a ribbon emitter is about to draw          (RibbonDrawArgs)
         OnInput,         // window input message (swallowable)         (InputArgs)
+        OnWorldClick,    // a world click resolved to a point/object   (WorldClickArgs)
         OnAdtChunkBuild, // an ADT map chunk is being built            (AdtChunkArgs)
         OnTextureUpload, // a texture is about to upload to the device (TextureUploadArgs)
         OnDoodadSpawn,   // a placed map doodad (CMapDoodad) was built (DoodadSpawnArgs)
@@ -59,6 +61,8 @@ namespace wxl::events
     struct M2SkinFinalizeArgs { void* model; };
     /** @brief Args for OnFrame. */
     struct FrameArgs          { void* device; };
+    /** @brief Args for OnUpdate, fired once per frame with the frame delta and timestamp. */
+    struct UpdateArgs         { float dt; uint32_t timeMs; };
     /** @brief Args for OnEndScene. */
     struct EndSceneArgs       { void* device; };
     /** @brief Args for OnWorldRender. */
@@ -100,6 +104,12 @@ namespace wxl::events
      *        otherwise read-only.
      */
     struct InputArgs         { uint32_t message; uintptr_t wparam; uintptr_t lparam; bool* handled; };
+    /**
+     * @brief Args for OnWorldClick, fired on a mouse button when the cursor ray hits the world (not when
+     *        the click was consumed by a UI subscriber). hitType is 2 for an M2/doodad, 3 for terrain or
+     *        WMO; x/y/z is the world hit point; objLo/objHi is the engine object handle (zero for terrain).
+     */
+    struct WorldClickArgs    { uint32_t message; int hitType; float x; float y; float z; void* objLo; void* objHi; };
     /** @brief Args for OnAdtChunkBuild. */
     struct AdtChunkArgs      { void* chunk; uint32_t layerCount; };
     /** @brief Args for OnTextureUpload. */

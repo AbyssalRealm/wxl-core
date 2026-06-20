@@ -37,6 +37,15 @@ namespace wxl::game::world
         Native<woff::World_TickFn>(woff::kTick)(param);
     }
 
+    /**
+     * @brief Reads the numeric map id of the loaded world.
+     * @return The current map id, or -1 when no world is loaded.
+     */
+    inline int32_t MapId()
+    {
+        return *reinterpret_cast<int32_t*>(woff::kCurrentMapId);
+    }
+
     /** @brief Pumps the async queues, blocking until no async file read is pending. */
     inline void AsyncWaitAll()
     {

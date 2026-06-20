@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 
 // INTERNAL to the core. World tick / load-gate entries, async-I/O queue primitives, and the
 // load-state globals. Modules never include this; they use wxl::game / wxl::events.
@@ -37,6 +38,29 @@ namespace wxl::offsets::game::world
     constexpr uintptr_t kFocusPosX = 0x00CD7778;
     constexpr uintptr_t kFocusPosY = 0x00CD777C;
     constexpr uintptr_t kFocusPosZ = 0x00CD7780;
+
+    // --- current map ---
+    // Numeric map id of the loaded world (int32; -1 while none). The map loader writes it before
+    // CWorld::Enter returns, so it is valid at the enter hook and still valid at the leave hook.
+    constexpr uintptr_t kCurrentMapId = 0x00ADFBC4;
+
+    // --- cursor world pick ---
+    // CWorldFrame singleton holder: *(void**)kWorldFrame is the world frame (pass as the this/ECX).
+    constexpr uintptr_t kWorldFrame = 0x00B7436C;
+    // Screen (DDC pixels) -> world ray: fills near/far points, returns nonzero when inside the viewport.
+    constexpr uintptr_t kScreenToRay = 0x004F6450;
+    // Cursor pick: casts the ray, returns the hit type (0 miss, 2 M2/doodad, 3 terrain/WMO), fills result[6].
+    constexpr uintptr_t kIntersectWrapper = 0x004F9930;
+    // Pick mask: terrain + WMO + M2/doodad ("pick anything under the cursor").
+    constexpr uint32_t kPickFlagsAnything = 0x01000124;
+    // Freshest cached cursor on the world frame, in DDC pixels (refreshed from mouse-move).
+    constexpr size_t kWorldFrameCursorDdcX = 0x310;
+    constexpr size_t kWorldFrameCursorDdcY = 0x314;
+
+    // Screen->ray (this = world frame): (sx, sy, &near, &far) -> nonzero if inside the viewport.
+    using ScreenToRayFn = char(__thiscall*)(void* worldFrame, float sx, float sy, void* outNear, void* outFar);
+    // Cursor pick wrapper: (rayStart, rayEnd, flags, result[6]) -> hit type (0/2/3).
+    using IntersectFn = int(__cdecl*)(const void* rayStart, const void* rayEnd, uint32_t flags, void* result6);
 
     // --- async I/O queue primitives ---
     // Wait-all: blocks pumping the async queues until no async file read is pending.

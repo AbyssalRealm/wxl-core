@@ -18,12 +18,14 @@
 
 #include "core/Logger.hpp"
 #include "events/Event.hpp"
+#include "game/world/Pick.hpp"
 
 #include <windows.h>
 
 namespace
 {
-    namespace ev = wxl::events;
+    namespace ev    = wxl::events;
+    namespace world = wxl::game::world;
 
     HWND    g_hwnd        = nullptr;
     WNDPROC g_origWndProc = nullptr;
@@ -72,6 +74,17 @@ namespace
         ev::InputArgs a{ m, static_cast<uintptr_t>(w), static_cast<uintptr_t>(l), &handled };
         ev::Emit(ev::Event::OnInput, &a);
         if (handled) return 0;
+
+        // A world click the UI did not consume: resolve the cursor to a world point/object and publish it.
+        if (m == WM_LBUTTONDOWN || m == WM_RBUTTONDOWN)
+        {
+            world::WorldHit hit;
+            if (world::PickCursor(hit))
+            {
+                ev::WorldClickArgs wc{ m, hit.type, hit.pos.x, hit.pos.y, hit.pos.z, hit.objLo, hit.objHi };
+                ev::Emit(ev::Event::OnWorldClick, &wc);
+            }
+        }
         return CallWindowProcA(g_origWndProc, h, m, w, l);
     }
 }
