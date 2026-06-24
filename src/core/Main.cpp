@@ -78,6 +78,12 @@ BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID)
 
         wxl::core::hook::Init();
         wxl::game::RegisterAllBindings();
+
+        // Arm the archive-mount guard now, on the loader thread, before the client builds its archive
+        // set: the deferred main thread below is raced past by the client's startup, so a guard armed
+        // there would miss the mount. Drops the host-owned loose directories so the client stays lean.
+        wxl::runtime::storage::InstallArchiveGuard();
+
         CloseHandle(CreateThread(nullptr, 0, &MainThread, nullptr, 0, nullptr));
     }
     return TRUE;

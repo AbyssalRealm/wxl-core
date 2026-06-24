@@ -21,6 +21,7 @@
 #include "core/Hook.hpp"
 #include "core/Logger.hpp"
 #include "offsets/engine/Io.hpp"
+#include "runtime/adt/Adt.hpp"
 
 #include <windows.h>
 #include <cstdint>
@@ -75,6 +76,7 @@ namespace
     io::Storage_FileReadFn  g_origRead  = nullptr;
     io::Storage_FileSeekFn  g_origSeek  = nullptr;
     io::Storage_FileCloseFn g_origClose = nullptr;
+    io::Storage_ArchiveMountFn g_origArchiveMount = nullptr;
 
     uint32_t g_served = 0; // files served from the host
     uint32_t g_missed = 0; // host connected but file not served (read natively)
@@ -193,6 +195,14 @@ namespace
                     f->buffer = nullptr;
                     f->hostId = r.id;
                     mode = "stream";
+                }
+
+                // A served ADT carries a trailing ATSC texture-scale table; record it and trim it off so
+                // the native loader sees only the ADT bytes.
+                if (ok && f->buffer && f->size)
+                {
+                    const uint32_t served = wxl::runtime::adt::IngestAdtBytes(name, f->buffer, f->size);
+                    if (served < f->size) f->size = served;
                 }
 
                 if (ok)
@@ -353,10 +363,52 @@ namespace
         }
         return g_origClose(handle);
     }
+
+    /**
+     * @brief Detours the per-archive mount, dropping the loose override directories the host owns.
+     *
+     * The client mounts every base and patch archive through here. A loose override that is a DIRECTORY
+     * (the modern data the host serves) is skipped, so the client never indexes its huge tree into its
+     * 32-bit address space; the file-open detour serves those files from the host instead. Real .MPQ
+     * files (the native data the client must read itself) mount unchanged. Returning 0 reads as an
+     * absent optional archive, which the boot path tolerates.
+     * @param name      archive path the client is about to mount.
+     * @param priority  search priority.
+     * @param flags     mount flags.
+     * @param out       receives the archive handle on a native mount.
+     * @return the native mount result, or 0 when the directory is skipped.
+     */
+    int __stdcall ArchiveMountDetour(const char* name, int priority, uint32_t flags, void** out)
+    {
+        const DWORD attrs = name ? GetFileAttributesA(name) : INVALID_FILE_ATTRIBUTES;
+        if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY))
+        {
+            WLOG_INFO("archive-mount: SKIP loose dir '%s' (host-owned)", name);
+            if (out) *out = nullptr;
+            return 0;
+        }
+        WLOG_INFO("archive-mount: keep '%s'", name ? name : "(null)");
+        return g_origArchiveMount(name, priority, flags, out);
+    }
 }
 
 namespace wxl::runtime::storage
 {
+    /**
+     * @brief Arms the archive-mount guard, dropping the host-owned loose directories at mount time.
+     *
+     * Must run before the client builds its archive set (call it from the DLL entry, on the loader
+     * thread, before the client's startup proceeds). Independent of the host connection.
+     */
+    void InstallArchiveGuard()
+    {
+        wxl::core::hook::Install("Storage_ArchiveMount", io::kArchiveMount,
+            reinterpret_cast<void*>(&ArchiveMountDetour),
+            reinterpret_cast<void**>(&g_origArchiveMount));
+        wxl::core::hook::EnableAll();
+        WLOG_INFO("Storage: archive-mount guard armed");
+    }
+
     /**
      * @brief Launches the host, connects best-effort, and installs the archive file-I/O detours.
      */

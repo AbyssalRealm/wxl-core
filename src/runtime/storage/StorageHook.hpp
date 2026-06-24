@@ -19,6 +19,15 @@
 namespace wxl::runtime::storage
 {
     /**
+     * @brief Arms the archive-mount guard that drops the host-owned loose directories at mount time.
+     *
+     * Keeps the client from indexing the modern data tree into its 32-bit address space. Must run
+     * before the client builds its archive set, so call it from the DLL entry on the loader thread
+     * (not from the deferred main thread, which the client's startup races past). No host dependency.
+     */
+    void InstallArchiveGuard();
+
+    /**
      * @brief Launches the asset host and hooks the client archive file-I/O primitives.
      *
      * A file the host serves is read from the host's bytes; everything else runs native. The hooks

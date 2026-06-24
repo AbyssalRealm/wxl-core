@@ -35,6 +35,11 @@ namespace wxl::offsets::engine::io
     // Close (handle).
     constexpr uintptr_t kFileClose = 0x00422910;
 
+    // Mount one archive (or a loose override directory) into the search chain, the single choke point
+    // every base and patch mount funnels through. (name, priority, flags, &out) -> nonzero on success;
+    // returning 0 reads as an absent optional archive, which the boot path tolerates.
+    constexpr uintptr_t kArchiveMount = 0x00421950;
+
     // Open flag: load the whole file into the handle buffer.
     constexpr uint32_t  kOpenWholeFile = 0x20000;
 
@@ -43,4 +48,5 @@ namespace wxl::offsets::engine::io
     using Storage_FileReadFn  = int(__stdcall*)(void* handle, void* dst, uint32_t len, uint32_t* read, void* ovl, uint32_t unk);
     using Storage_FileSeekFn  = uint32_t(__stdcall*)(void* handle, int32_t distLow, uint32_t* distHigh, uint32_t method);
     using Storage_FileCloseFn = int(__stdcall*)(void* handle);
+    using Storage_ArchiveMountFn = int(__stdcall*)(const char* name, int priority, uint32_t flags, void** out);
 }
