@@ -100,7 +100,10 @@ namespace
     /**
      * @brief Reports whether a name is routed to the host.
      *
-     * Skips .pub/.url, which are existence probes rather than archive content.
+     * Skips .pub/.url, which are existence probes rather than archive content. Skips the modern terrain
+     * sidecars the client has no loader for: .tex (the per-map texture catalog) and _lod.adt (the
+     * low-detail tile). Serving their bytes stalls or faults the terrain load, so the open is left to miss
+     * natively and the loader proceeds without them.
      * @param name  file name to test.
      * @return true when the name should be served from the host.
      */
@@ -108,6 +111,7 @@ namespace
     {
         if (!name || name[0] == '\0') return false;
         if (EndsWithCI(name, ".pub") || EndsWithCI(name, ".url")) return false;
+        if (EndsWithCI(name, ".tex") || EndsWithCI(name, "_lod.adt")) return false;
         return true;
     }
 
