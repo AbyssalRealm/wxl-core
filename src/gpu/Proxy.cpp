@@ -142,6 +142,21 @@ extern "C" __declspec(dllexport) void WxlD3D12DrainDebug()
 }
 
 /**
+ * @brief Sets the supersampling factor for the windowed backbuffer, exposed to WarcraftXL.dll.
+ * @param factor  1.0 (off), 1.5, 2.0, ...; takes effect on the next device create/reset.
+ */
+extern "C" __declspec(dllexport) void WxlSetSsaaFactor(float factor)
+{
+    wxl::gpu::capture::SetSsaaFactor(factor);
+}
+
+/** @brief Returns the current supersampling factor, exposed to WarcraftXL.dll. @return The factor (1.0 = off). */
+extern "C" __declspec(dllexport) float WxlGetSsaaFactor()
+{
+    return wxl::gpu::capture::SsaaFactor();
+}
+
+/**
  * @brief Loads the real d3d9 on process attach.
  * @param reason  DLL notification reason.
  * @return TRUE.

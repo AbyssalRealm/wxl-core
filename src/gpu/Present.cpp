@@ -56,6 +56,7 @@ namespace
     IDCompositionDesktopDevice* g_dcomp  = nullptr;
     IDCompositionTarget*        g_target = nullptr;
     IDCompositionVisual2*       g_visual = nullptr;
+    HWND             g_hwnd = nullptr;
     UINT             g_w = 0, g_h = 0;
 
     IDirect3DDevice9On12* g_on12 = nullptr;
@@ -180,7 +181,18 @@ namespace
      */
     bool EnsureSwapchain(HWND hwnd, UINT w, UINT h)
     {
-        if (g_swap && g_w == w && g_h == h) return true;
+        if (g_swap && g_hwnd == hwnd && g_w == w && g_h == h) return true;
+
+        // A graphics restart recreates the engine's window; the composition target is bound to the old hwnd,
+        // so tear the composition objects down and rebuild them on the new window (the dcomp device is reused).
+        if (g_hwnd != hwnd)
+        {
+            if (g_swap)   { g_swap->Release();   g_swap = nullptr; }
+            if (g_visual) { g_visual->Release(); g_visual = nullptr; }
+            if (g_target) { g_target->Release(); g_target = nullptr; }
+            g_w = g_h = 0;
+            g_hwnd = hwnd;
+        }
 
         if (g_swap && (g_w != w || g_h != h))
         {
@@ -269,7 +281,15 @@ namespace wxl::gpu::present
             return false;
         }
 
-        if (!EnsureSwapchain(window, w, h))
+        // The swapchain matches the window, not the backbuffer: when supersampling enlarges the backbuffer,
+        // the fullscreen blit samples it with a linear filter and downsamples to the window (a box filter at
+        // exact integer factors). With no supersampling the two sizes are equal and this is a plain copy.
+        RECT rc = {};
+        GetClientRect(window, &rc);
+        UINT dw = (UINT)(rc.right - rc.left), dh = (UINT)(rc.bottom - rc.top);
+        if (dw == 0 || dh == 0) { dw = w; dh = h; }
+
+        if (!EnsureSwapchain(window, dw, dh))
         {
             g_on12->ReturnUnderlyingResource(surf, 0, nullptr, nullptr);
             bb12->Release(); surf->Release();
@@ -324,9 +344,9 @@ namespace wxl::gpu::present
         g_list->SetGraphicsRootDescriptorTable(0, srvGpu);
         g_list->SetPipelineState(g_pso);
         g_list->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
-        D3D12_VIEWPORT vp = { 0, 0, (float)w, (float)h, 0, 1 };
+        D3D12_VIEWPORT vp = { 0, 0, (float)dw, (float)dh, 0, 1 };
         g_list->RSSetViewports(1, &vp);
-        D3D12_RECT sc = { 0, 0, (LONG)w, (LONG)h };
+        D3D12_RECT sc = { 0, 0, (LONG)dw, (LONG)dh };
         g_list->RSSetScissorRects(1, &sc);
         g_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         g_list->DrawInstanced(3, 1, 0, 0);

@@ -20,6 +20,7 @@
 #include "core/Logger.hpp"
 #include "events/Event.hpp"
 #include "game/gx/Gx.hpp"
+#include "gpu/Proxy.hpp"
 #include "offsets/engine/Gx.hpp"
 #include "offsets/game/M2.hpp"
 
@@ -178,16 +179,74 @@ namespace
     }
 
     /**
+     * @brief Reads the backbuffer-format pixel size (the engine's native, un-supersampled resolution).
+     * @param outW receives width, @param outH receives height.
+     * @return The graphics-device object, or null if unavailable.
+     */
+    uint8_t* SsaaFormatSize(uint32_t& outW, uint32_t& outH)
+    {
+        uint8_t* base = reinterpret_cast<uint8_t*>(*reinterpret_cast<void**>(off::kGxDevicePtr));
+        if (!base) return nullptr;
+        outW = *reinterpret_cast<uint32_t*>(base + off::kFormatWidth);
+        outH = *reinterpret_cast<uint32_t*>(base + off::kFormatHeight);
+        return base;
+    }
+
+    /** @brief Writes a float field on the device only when it differs (avoids redundant writes). */
+    void SsaaSet(uint8_t* base, size_t off, float v)
+    {
+        float* p = reinterpret_cast<float*>(base + off);
+        if (*p != v) *p = v;
+    }
+
+    /**
+     * @brief Supersampling: makes the WORLD render at factor*resolution (defWindow), the source for each
+     *        frame's backbuffer bind. World-only SSAA, so this sets defWindow (world target) but NOT
+     *        curWindow for the UI -- the UI is reset to native after the world (see SsaaSetUiNative).
+     */
+    void SsaaSetWorldScale()
+    {
+        const float s = WxlGetSsaaFactor();
+        if (s <= 1.01f) return;
+        uint32_t fw = 0, fh = 0;
+        uint8_t* base = SsaaFormatSize(fw, fh);
+        if (!base || fw == 0 || fh == 0) return;
+        SsaaSet(base, off::kDefWindowWidth, fw * s);
+        SsaaSet(base, off::kDefWindowHeight, fh * s);
+    }
+
+    /**
+     * @brief Supersampling: resets the render resolution to native (curWindow) for the UI pass, so the UI
+     *        draws crisp at display resolution into the native top-left region of the enlarged backbuffer
+     *        (where the module has already downsampled the world). World stays supersampled, UI stays sharp.
+     */
+    void SsaaSetUiNative()
+    {
+        const float s = WxlGetSsaaFactor();
+        if (s <= 1.01f) return;
+        uint32_t fw = 0, fh = 0;
+        uint8_t* base = SsaaFormatSize(fw, fh);
+        if (!base || fw == 0 || fh == 0) return;
+        SsaaSet(base, off::kCurWindowWidth, (float)fw);
+        SsaaSet(base, off::kCurWindowHeight, (float)fh);
+    }
+
+    /**
      * @brief Detours world-frame finalize, emitting OnWorldRenderEnd at the world -> UI boundary.
      *
-     * Runs after the native finalize, when the 3D scene is done and the UI pass has not started.
+     * Runs after the native finalize, when the 3D scene is done and the UI pass has not started. With
+     * supersampling on: the world has just rendered at factor resolution (defWindow); the OnWorldRenderEnd
+     * subscriber downsamples it into the native top-left region of the backbuffer, then the UI is reset to
+     * native so it draws sharp over it.
      * @param worldFrame  world frame being finalized.
      */
     void __cdecl hkWorldFinalize(void* worldFrame)
     {
+        SsaaSetWorldScale();   // keep the world at the supersampling factor for the next frame
         g_origWorldFinalize(worldFrame);
         ev::WorldRenderEndArgs a{ gx::RawDevice() };
         ev::Emit(ev::Event::OnWorldRenderEnd, &a);
+        SsaaSetUiNative();     // UI renders at native resolution over the downsampled world
     }
 
     /**

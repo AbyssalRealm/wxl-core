@@ -28,15 +28,21 @@ namespace
     ID3D12CommandQueue*         g_presentQueue = nullptr;
     HWND                        g_devWindow    = nullptr;
     BOOL                        g_windowed     = TRUE;
+    float                       g_ssaaFactor   = 1.0f;   // supersampling: backbuffer scale (1.0 = off)
     wxl::gpu::capture::FrameFn  g_frame        = nullptr;
 
-    // Standard IDirect3DDevice9 vtable indices (Present=17, BeginScene=41, EndScene=42, Clear=43).
+    // Standard IDirect3DDevice9 vtable indices (Reset=16, Present=17, BeginScene=41, EndScene=42, Clear=43).
+    constexpr int kVtReset    = 16;
     constexpr int kVtPresent  = 17;
     constexpr int kVtEndScene = 42;
+    using ResetFn    = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, D3DPRESENT_PARAMETERS*);
     using EndSceneFn = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*);
     using PresentFn  = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, const RECT*, const RECT*, HWND, const RGNDATA*);
-    EndSceneFn g_origEndScene = nullptr;
-    PresentFn  g_origPresent  = nullptr;
+    ResetFn    g_origReset     = nullptr;
+    EndSceneFn g_origEndScene  = nullptr;
+    PresentFn  g_origPresent   = nullptr;
+
+    HRESULT STDMETHODCALLTYPE HookReset(IDirect3DDevice9* dev, D3DPRESENT_PARAMETERS* pp);
 
     /**
      * @brief Invokes the per-frame callback then forwards to the original EndScene.
@@ -89,6 +95,11 @@ namespace
         g_origPresent = reinterpret_cast<PresentFn>(vt[kVtPresent]);
         vt[kVtPresent] = reinterpret_cast<void*>(&HookPresent);
         VirtualProtect(&vt[kVtPresent], sizeof(void*), old, &old);
+
+        VirtualProtect(&vt[kVtReset], sizeof(void*), PAGE_EXECUTE_READWRITE, &old);
+        g_origReset = reinterpret_cast<ResetFn>(vt[kVtReset]);
+        vt[kVtReset] = reinterpret_cast<void*>(&HookReset);
+        VirtualProtect(&vt[kVtReset], sizeof(void*), old, &old);
     }
 
     /**
@@ -124,6 +135,38 @@ namespace
         if (pp->Flags != before || pp->BackBufferCount != beforeCount)
             Log("capture: windowed present sanitized (Flags 0x%X->0x%X, BBCount %u->%u)",
                 before, pp->Flags, beforeCount, pp->BackBufferCount);
+
+        // Supersampling: enlarge the backbuffer so the engine renders the frame at a higher resolution; the
+        // proxy's present downsamples it to the window. Windowed only (the backbuffer is decoupled from the
+        // display mode there) and only with explicit sizes.
+        if (g_ssaaFactor > 1.01f && pp->BackBufferWidth > 0 && pp->BackBufferHeight > 0)
+        {
+            const UINT bw = (UINT)(pp->BackBufferWidth * g_ssaaFactor + 0.5f);
+            const UINT bh = (UINT)(pp->BackBufferHeight * g_ssaaFactor + 0.5f);
+            Log("capture: SSAA x%.2f backbuffer %ux%u -> %ux%u", g_ssaaFactor, pp->BackBufferWidth, pp->BackBufferHeight, bw, bh);
+            pp->BackBufferWidth = bw;
+            pp->BackBufferHeight = bh;
+        }
+    }
+
+    /**
+     * @brief Re-sanitizes present params on a device reset (resolution change, mode switch).
+     *
+     * The engine resets the device (it does not recreate it) when the resolution or window mode changes, so
+     * the windowed sanitize and the supersampling scale must be reapplied here, not only at CreateDevice.
+     * @param dev  device being reset.
+     * @param pp   new present parameters, sanitized in place.
+     * @return Result of the original Reset.
+     */
+    HRESULT STDMETHODCALLTYPE HookReset(IDirect3DDevice9* dev, D3DPRESENT_PARAMETERS* pp)
+    {
+        SanitizePresentParams(pp);
+        if (pp)
+        {
+            g_windowed = pp->Windowed;
+            if (pp->hDeviceWindow) g_devWindow = pp->hDeviceWindow;
+        }
+        return g_origReset(dev, pp);
     }
 
     /**
@@ -133,11 +176,13 @@ namespace
      */
     void Capture(IDirect3DDevice9* dev, ID3D12CommandQueue* queue)
     {
-        if (g_device) return;
+        if (g_device == dev) return;   // already hooked this device
+        // The engine recreates the device (and its window) on a graphics restart (e.g. /console gxRestart),
+        // giving it a fresh vtable, so re-hook the new device instead of leaving it unhooked (white screen).
         g_device = dev;
         g_presentQueue = queue;
         PatchEndScene(dev);
-        Log("capture: engine device %p captured (queue %p), EndScene hooked", dev, queue);
+        Log("capture: engine device %p captured (queue %p), hooks installed", dev, queue);
     }
 
     /**
@@ -276,4 +321,10 @@ namespace wxl::gpu::capture
 
     /** @brief Returns the captured (presenting) device's On12 queue. @return The queue, or null before capture. */
     ID3D12CommandQueue* PresentQueue()       { return g_presentQueue; }
+
+    /** @brief Sets the supersampling factor (applied on the next device create/reset). @param factor 1.0 = off. */
+    void  SetSsaaFactor(float factor)        { g_ssaaFactor = factor; }
+
+    /** @brief Returns the current supersampling factor. @return The factor (1.0 = off). */
+    float SsaaFactor()                       { return g_ssaaFactor; }
 }

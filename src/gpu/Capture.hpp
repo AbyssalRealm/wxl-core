@@ -67,4 +67,16 @@ namespace wxl::gpu::capture
      * @return The presenting device's queue, or null until the engine has called CreateDevice.
      */
     ID3D12CommandQueue* PresentQueue();
+
+    /**
+     * @brief Sets the supersampling factor applied to the windowed backbuffer (1.0 = off).
+     *
+     * The factor scales the backbuffer the engine renders into; the proxy's present downsamples it to the
+     * window. It takes effect on the next device create/reset (e.g. a resolution change), not immediately.
+     * @param factor  1.0 (off), 1.5, 2.0, ...
+     */
+    void SetSsaaFactor(float factor);
+
+    /** @brief Returns the current supersampling factor. @return The factor (1.0 = off). */
+    float SsaaFactor();
 }
