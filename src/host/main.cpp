@@ -297,46 +297,8 @@ namespace
             }
         };
 
-        auto addHeadCollectionAlias = [&](const std::string& candidate) {
-            constexpr const char* kHeadPrefix = "item\\objectcomponents\\head\\";
-            constexpr const char* kCollectionsPrefix = "Item\\ObjectComponents\\Collections\\";
-
-            const std::string candidateKey = NameKey(candidate);
-            if (!StartsWithCI(candidateKey, kHeadPrefix)) return;
-
-            const size_t fileStart = std::strlen(kHeadPrefix);
-            const size_t stemEnd = candidateKey.find_last_of('.');
-            if (stemEnd == std::string::npos || stemEnd <= fileStart) return;
-            if (candidateKey.find("helm", fileStart) >= stemEnd) return;
-
-            std::string alias = candidate;
-            alias.replace(0, fileStart, kCollectionsPrefix);
-            addDerivedAlias(std::move(alias));
-        };
-
         for (size_t i = 0; i < candidates.size(); ++i)
-        {
-            addHeadCollectionAlias(candidates[i]);
             addModelExtensionAlias(candidates[i]);
-        }
-    }
-
-    void AppendObjectComponentTextureAliases(const std::string& name, std::vector<std::string>& aliases)
-    {
-        const std::string key = NameKey(name);
-        if (!StartsWithCI(key, "item\\objectcomponents\\head\\")) return;
-        if (!EndsWithCI(key, ".blp") && !EndsWithCI(key, ".tga")) return;
-
-        constexpr const char* kHeadPrefix = "item\\objectcomponents\\head\\";
-        constexpr const char* kCollectionsPrefix = "Item\\ObjectComponents\\Collections\\";
-        const size_t fileStart = std::strlen(kHeadPrefix);
-        const size_t stemEnd = key.find_last_of('.');
-        if (stemEnd == std::string::npos || stemEnd <= fileStart) return;
-        if (key.find("helm", fileStart) >= stemEnd) return;
-
-        std::string alias = name;
-        alias.replace(0, fileStart, kCollectionsPrefix);
-        AddUniqueAlias(aliases, name, std::move(alias));
     }
 
     /**
@@ -428,13 +390,23 @@ namespace
 
         std::vector<std::string> aliases;
         AppendObjectComponentRaceGenderAliases(name, aliases);
-        AppendObjectComponentTextureAliases(name, aliases);
         AppendTextureComponentAliases(name, aliases);
         for (const std::string& alias : aliases)
         {
             if (wxl::host::Provide(alias, out))
                 return true;
             if (ProduceCandidate(name, alias, out))
+                return true;
+        }
+
+        // Last resort: serve the same file name from wherever the mounted set stores it.
+        std::string real = g_mpq->ResolveByFileName(name);
+        if (!real.empty() && ProduceCandidate(name, real, out))
+            return true;
+        for (const std::string& alias : aliases)
+        {
+            real = g_mpq->ResolveByFileName(alias);
+            if (!real.empty() && ProduceCandidate(name, real, out))
                 return true;
         }
 

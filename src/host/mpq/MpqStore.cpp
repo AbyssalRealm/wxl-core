@@ -62,6 +62,9 @@ namespace
         while (i < n.size() && n[i] == '\\') ++i;
         return n.substr(i);
     }
+
+    // Only the item subtree is indexed for by-name resolution.
+    constexpr const char* kIndexPrefix = "item\\";
 }
 
 namespace wxl::host::mpq
@@ -156,15 +159,163 @@ namespace wxl::host::mpq
         }
         const ULONGLONG mountMs = GetTickCount64() - t0;
 
+        // By-name index over the item subtree, same priority order as the read path.
+        const ULONGLONG i0 = GetTickCount64();
+        for (const std::string& lr : m_looseRoots) IndexLooseRoot(lr);
+        for (void* a : m_archives) IndexArchiveListfile(a);
+        const ULONGLONG indexMs = GetTickCount64() - i0;
+
         log::Printf("mpq: locale=%s, %zu archives, %zu loose roots, mounted in %llu ms",
             m_locale.empty() ? "(none)" : m_locale.c_str(), m_archives.size(), m_looseRoots.size(),
             static_cast<unsigned long long>(mountMs));
+        log::Printf("mpq: item index: %zu names in %llu ms",
+            m_itemIndex.size(), static_cast<unsigned long long>(indexMs));
         for (size_t i = 0; i < m_archiveNames.size(); ++i)
             log::Printf("mpq:   [%zu] %s", i, m_archiveNames[i].c_str());
         for (const std::string& lr : m_looseRoots)
             log::Printf("mpq:   loose <- %s", lr.c_str());
 
         return !m_archives.empty() || !m_looseRoots.empty();
+    }
+
+    /**
+     * @brief Records one mounted path in the file-name index if it belongs to the item subtree.
+     * @param path  archive-internal path, backslash separators
+     */
+    void MpqStore::AddIndexEntry(const std::string& path)
+    {
+        const std::string lower = ToLower(path);
+        if (lower.rfind(kIndexPrefix, 0) != 0) return;
+        const size_t slash = lower.find_last_of('\\');
+        if (slash == std::string::npos || slash + 1 >= lower.size()) return;
+
+        std::vector<std::string>& paths = m_itemIndex[lower.substr(slash + 1)];
+        for (const std::string& existing : paths)
+            if (ToLower(existing) == lower) return;
+        paths.push_back(path);
+    }
+
+    /**
+     * @brief Walks the Item folder of a loose root and indexes every file found.
+     * @param root  absolute loose root path, trailing slash
+     */
+    void MpqStore::IndexLooseRoot(const std::string& root)
+    {
+        std::vector<std::string> pending;
+        pending.emplace_back("Item");
+        while (!pending.empty())
+        {
+            std::string rel = std::move(pending.back());
+            pending.pop_back();
+
+            WIN32_FIND_DATAA fd{};
+            HANDLE h = FindFirstFileA((root + rel + "\\*").c_str(), &fd);
+            if (h == INVALID_HANDLE_VALUE) continue;
+            do
+            {
+                std::string entry = fd.cFileName;
+                if (entry == "." || entry == "..") continue;
+                std::string relEntry = rel + "\\" + entry;
+                if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+                    pending.push_back(std::move(relEntry));
+                else
+                    AddIndexEntry(relEntry);
+            } while (FindNextFileA(h, &fd));
+            FindClose(h);
+        }
+    }
+
+    /**
+     * @brief Reads the archive's (listfile) by exact name and indexes its item entries.
+     * @param archive  StormLib archive HANDLE
+     */
+    void MpqStore::IndexArchiveListfile(void* archive)
+    {
+        HANDLE hFile = nullptr;
+        if (!SFileOpenFileEx(static_cast<HANDLE>(archive), "(listfile)", 0, &hFile) || !hFile) return;
+
+        std::string text;
+        DWORD size = SFileGetFileSize(hFile, nullptr);
+        if (size != SFILE_INVALID_SIZE && size)
+        {
+            text.resize(size);
+            DWORD read = 0;
+            SFileReadFile(hFile, text.data(), size, &read, nullptr);
+            text.resize(read);
+        }
+        SFileCloseFile(hFile);
+
+        size_t start = 0;
+        while (start < text.size())
+        {
+            size_t end = text.find_first_of("\r\n", start);
+            if (end == std::string::npos) end = text.size();
+            if (end > start)
+                AddIndexEntry(NormalizeName(std::string_view(text).substr(start, end - start)));
+            start = end + 1;
+        }
+    }
+
+    /**
+     * @brief Picks the indexed path for `fileKey` closest to the requested location.
+     * @param requestLower  lowercase requested path, used to rank candidates and reject itself
+     * @param fileKey       lowercase file name to look up
+     * @return the best candidate path, or nullptr if none differs from the request
+     */
+    const std::string* MpqStore::FindIndexed(const std::string& requestLower, const std::string& fileKey) const
+    {
+        auto it = m_itemIndex.find(fileKey);
+        if (it == m_itemIndex.end()) return nullptr;
+
+        const std::string* best = nullptr;
+        size_t bestCommon = 0;
+        for (const std::string& path : it->second)
+        {
+            const std::string lower = ToLower(path);
+            if (lower == requestLower) continue;
+            size_t common = 0;
+            const size_t n = std::min(lower.size(), requestLower.size());
+            while (common < n && lower[common] == requestLower[common]) ++common;
+            if (!best || common > bestCommon)
+            {
+                best = &path;
+                bestCommon = common;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * @brief Resolves a missed item path to a mounted path carrying the same file name.
+     * @param rawName  requested path whose exact location is absent
+     * @return a serveable path with the same file name, or empty if none is indexed
+     */
+    std::string MpqStore::ResolveByFileName(std::string_view rawName) const
+    {
+        const std::string lower = ToLower(NormalizeName(rawName));
+        if (lower.rfind(kIndexPrefix, 0) != 0) return {};
+        const size_t slash = lower.find_last_of('\\');
+        if (slash == std::string::npos || slash + 1 >= lower.size()) return {};
+
+        const std::string file = lower.substr(slash + 1);
+        const std::string* best = FindIndexed(lower, file);
+        if (!best)
+        {
+            // Sibling extensions name the same content: model .m2/.mdx, texture .blp/.tga.
+            const size_t dot = file.find_last_of('.');
+            if (dot != std::string::npos)
+            {
+                const std::string ext = file.substr(dot);
+                std::string swapped;
+                if      (ext == ".m2")  swapped = ".mdx";
+                else if (ext == ".mdx") swapped = ".m2";
+                else if (ext == ".blp") swapped = ".tga";
+                else if (ext == ".tga") swapped = ".blp";
+                if (!swapped.empty())
+                    best = FindIndexed(lower, file.substr(0, dot) + swapped);
+            }
+        }
+        return best ? *best : std::string();
     }
 
     /**

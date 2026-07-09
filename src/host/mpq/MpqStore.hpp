@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 // Asset-agnostic archive I/O. Serves raw bytes; whether a file needs reshaping is the asset handlers'
@@ -61,14 +62,29 @@ namespace wxl::host::mpq
          */
         bool ReadRange(std::string_view name, uint32_t off, uint32_t len, std::vector<uint8_t>& out) const;
 
+        /**
+         * @brief Resolves a missed item path to a mounted path carrying the same file name.
+         * @param name  requested path whose exact location is absent
+         * @return a serveable path with the same file name, or empty if none is indexed
+         */
+        std::string ResolveByFileName(std::string_view name) const;
+
         /** @brief Closes all open archive handles. */
         ~MpqStore();
 
     private:
+        void IndexLooseRoot(const std::string& root);
+        void IndexArchiveListfile(void* archive);
+        void AddIndexEntry(const std::string& path);
+        const std::string* FindIndexed(const std::string& requestLower, const std::string& fileKey) const;
+
         // Highest priority first (search order). StormLib handles mutate on read, so mutable.
         mutable std::vector<void*> m_archives;     // StormLib HANDLEs
         std::vector<std::string>   m_archiveNames; // parallel to m_archives, for logging
         std::vector<std::string>   m_looseRoots;   // absolute folder paths, trailing slash
         std::string                m_locale;       // detected locale folder name
+
+        // File-name lookup over the item subtree: lowercase file name -> mounted paths, priority order.
+        std::unordered_map<std::string, std::vector<std::string>> m_itemIndex;
     };
 }
