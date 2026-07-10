@@ -30,8 +30,14 @@ namespace wxl::runtime::modules
             InstallFn   fn;
         };
 
-        // Function-local static so registration from global constructors never races init order.
+        // Function-local statics so registration from global constructors never races init order.
         std::vector<Entry>& Registry()
+        {
+            static std::vector<Entry> v;
+            return v;
+        }
+
+        std::vector<Entry>& BootRegistry()
         {
             static std::vector<Entry> v;
             return v;
@@ -49,6 +55,20 @@ namespace wxl::runtime::modules
         {
             e.fn();
             WLOG_INFO("modules: installed %s", e.name);
+        }
+    }
+
+    void RegisterBoot(const char* name, InstallFn fn)
+    {
+        if (fn) BootRegistry().push_back(Entry{ name ? name : "?", fn });
+    }
+
+    void RunBoot()
+    {
+        for (const Entry& e : BootRegistry())
+        {
+            e.fn();
+            WLOG_INFO("modules: boot-installed %s", e.name);
         }
     }
 }

@@ -40,4 +40,22 @@ namespace wxl::runtime::modules
      * Called once from the main thread, after the device wait and before EnableAll.
      */
     void RunAll();
+
+    /**
+     * @brief Registers a boot-time installer.
+     *
+     * Boot installers run on the loader thread inside DllMain, after the log opens and before the
+     * client's own startup code executes. For patches that must precede client init (boot-sized
+     * allocations, archive mounts); keep them to memory patches, no hooking or waiting.
+     * @param name  short module name, for the install log line
+     * @param fn    installer to run
+     */
+    void RegisterBoot(const char* name, InstallFn fn);
+
+    /**
+     * @brief Runs every registered boot installer, in registration order.
+     *
+     * Called once from DllMain on the loader thread.
+     */
+    void RunBoot();
 }
