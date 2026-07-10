@@ -1,0 +1,54 @@
+// Module installer registry: runtime scripts self-register detour installers run from the main thread.
+// Copyright (C) 2026 WarcraftXL
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+#include "runtime/ModuleInstall.hpp"
+
+#include "core/Logger.hpp"
+
+#include <vector>
+
+namespace wxl::runtime::modules
+{
+    namespace
+    {
+        struct Entry
+        {
+            const char* name;
+            InstallFn   fn;
+        };
+
+        // Function-local static so registration from global constructors never races init order.
+        std::vector<Entry>& Registry()
+        {
+            static std::vector<Entry> v;
+            return v;
+        }
+    }
+
+    void Register(const char* name, InstallFn fn)
+    {
+        if (fn) Registry().push_back(Entry{ name ? name : "?", fn });
+    }
+
+    void RunAll()
+    {
+        for (const Entry& e : Registry())
+        {
+            e.fn();
+            WLOG_INFO("modules: installed %s", e.name);
+        }
+    }
+}
