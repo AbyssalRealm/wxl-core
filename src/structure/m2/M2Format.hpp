@@ -31,6 +31,7 @@ namespace wxl::structure::m2
 {
     constexpr uint32_t kMagicMD20 = 0x3032444D; // 'MD20' self-contained model (the only magic the loader accepts)
     constexpr uint32_t kMagicMD21 = 0x3132444D; // 'MD21' chunked container (a source wrapper; de-chunked elsewhere)
+    constexpr uint32_t kMagicAFM2 = 0x324D4641; // 'AFM2' chunked external-animation wrapper (a source wrapper; de-chunked elsewhere)
 
     constexpr uint32_t kClientVersion = 264;    // the loader's native inner version; every source compacts to it
 
