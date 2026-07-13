@@ -128,7 +128,11 @@ namespace
      * Skips .pub/.url, which are existence probes rather than archive content. Skips the modern terrain
      * sidecars the client has no loader for: .tex (the per-map texture catalog) and _lod.adt (the
      * low-detail tile). Serving their bytes stalls or faults the terrain load, so the open is left to miss
-     * natively and the loader proceeds without them. The name is already validated/non-empty (CopyArchiveName).
+     * natively and the loader proceeds without them. Skips audio (.wav/.mp3/.ogg): world sound loads read
+     * through the client's async path, which a synthetic handle never completes (glue-screen music reads
+     * synchronously and survives; world SFX/music never finish loading). No transform targets audio and no
+     * host-only source ships it, so the native archives already serve it correctly. The name is already
+     * validated/non-empty (CopyArchiveName).
      * @param name  file name to test.
      * @return true when the name should be served from the host.
      */
@@ -136,6 +140,7 @@ namespace
     {
         if (EndsWithCI(name, ".pub") || EndsWithCI(name, ".url")) return false;
         if (EndsWithCI(name, ".tex") || EndsWithCI(name, "_lod.adt")) return false;
+        if (EndsWithCI(name, ".wav") || EndsWithCI(name, ".mp3") || EndsWithCI(name, ".ogg")) return false;
         return true;
     }
 
