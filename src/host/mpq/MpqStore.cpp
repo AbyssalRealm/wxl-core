@@ -89,10 +89,12 @@ namespace wxl::host::mpq
         if (!root.empty() && (root.back() == '\\' || root.back() == '/')) root.pop_back();
         const std::string data = root + "\\Data";
 
-        // One pass over Data\* finds both: the locale folder (carries locale-<loc>.MPQ) and the loose
-        // override folders (Data\Patch*.MPQ that are DIRECTORIES, highest priority).
+        // One pass over Data\* finds three things: the locale folder (carries locale-<loc>.MPQ), the
+        // loose override folders (Data\Patch*.MPQ that are DIRECTORIES, highest priority), and any real
+        // custom patch archives (Data\Patch*.MPQ that are FILES beyond the standard patch/-2/-3 set).
         m_locale.clear();
         std::vector<std::string> looseDirs;
+        std::vector<std::string> extraArchives;
         {
             WIN32_FIND_DATAA fd{};
             HANDLE h = FindFirstFileA((data + "\\*").c_str(), &fd);
@@ -100,14 +102,22 @@ namespace wxl::host::mpq
             {
                 do
                 {
-                    if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
                     std::string d = fd.cFileName;
                     if (d == "." || d == "..") continue;
-                    if (m_locale.empty() && FileExistsOnDisk(data + "\\" + d + "\\locale-" + d + ".MPQ"))
-                        m_locale = d;
+                    const bool isDir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
                     std::string dl = ToLower(d);
-                    if (dl.rfind("patch", 0) == 0 && dl.size() > 4 && dl.substr(dl.size() - 4) == ".mpq")
-                        looseDirs.push_back(d);
+                    const bool looksLikePatch =
+                        dl.rfind("patch", 0) == 0 && dl.size() > 4 && dl.substr(dl.size() - 4) == ".mpq";
+                    if (isDir)
+                    {
+                        if (m_locale.empty() && FileExistsOnDisk(data + "\\" + d + "\\locale-" + d + ".MPQ"))
+                            m_locale = d;
+                        if (looksLikePatch) looseDirs.push_back(d);
+                    }
+                    else if (looksLikePatch && dl != "patch.mpq" && dl != "patch-2.mpq" && dl != "patch-3.mpq")
+                    {
+                        extraArchives.push_back(d);
+                    }
                 } while (FindNextFileA(h, &fd));
                 FindClose(h);
             }
@@ -119,8 +129,15 @@ namespace wxl::host::mpq
         });
         for (const std::string& d : looseDirs) m_looseRoots.push_back(data + "\\" + d + "\\");
 
-        // Archive set, highest priority first (search order).
-        std::vector<std::string> candidates = {
+        std::sort(extraArchives.begin(), extraArchives.end(), [](const std::string& a, const std::string& b) {
+            return ToLower(a) > ToLower(b); // Patch-5.MPQ before Patch-4.MPQ ...
+        });
+
+        // Archive set, highest priority first (search order). Custom patches (Patch-4.MPQ and beyond)
+        // outrank the standard patch-3/-2/base set, matching the client's own patch precedence.
+        std::vector<std::string> candidates;
+        for (const std::string& d : extraArchives) candidates.push_back("Data\\" + d);
+        const std::vector<std::string> standard = {
             "Data\\" + loc + "\\patch-" + loc + "-3.MPQ", "Data\\patch-3.MPQ",
             "Data\\" + loc + "\\patch-" + loc + "-2.MPQ", "Data\\patch-2.MPQ",
             "Data\\" + loc + "\\patch-" + loc + ".MPQ",   "Data\\patch.MPQ",
@@ -137,6 +154,7 @@ namespace wxl::host::mpq
             "Data\\common-2.MPQ",
             "Data\\common.MPQ",
         };
+        candidates.insert(candidates.end(), standard.begin(), standard.end());
 
         // Resolve by exact name only (never enumerate); skip the internal (listfile) and (attributes).
         const DWORD openFlags = MPQ_OPEN_READ_ONLY | MPQ_OPEN_NO_LISTFILE | MPQ_OPEN_NO_ATTRIBUTES;
