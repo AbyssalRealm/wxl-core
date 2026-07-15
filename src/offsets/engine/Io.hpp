@@ -24,7 +24,6 @@ namespace wxl::offsets::engine::io
 {
     // Open (archiveOrNull, name, flags, &handle) -> nonzero, fills handle.
     constexpr uintptr_t kFileOpen  = 0x00424B50;
-    // Second open entry: thin open-by-name (archiveOrNull, name, flags, &handle) -> bool.
     constexpr uintptr_t kFileOpen2 = 0x00422040;
     // Size (handle, &sizeHigh) -> file size low dword.
     constexpr uintptr_t kFileSize  = 0x004218C0;

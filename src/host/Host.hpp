@@ -151,7 +151,7 @@ namespace wxl::host
     bool ResolveFdid(uint32_t fileDataId, std::string& outPath);
 
     // --- host environment (set by the host at startup; read by modules that read the archives themselves,
-    //     e.g. the prefetch pool mounting its own per-thread MpqStore) ---
+    //     e.g. a resolver mounting its own MpqStore to load DB2 path tables) ---
 
     /**
      * @brief Stores the client data root for modules that read the archives themselves.

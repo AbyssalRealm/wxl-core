@@ -77,7 +77,6 @@ namespace
     }
 
     io::Storage_FileOpenFn  g_origOpen  = nullptr;
-    io::Storage_FileOpenFn  g_origOpen2 = nullptr;
     io::Storage_FileSizeFn  g_origSize  = nullptr;
     io::Storage_FileReadFn  g_origRead  = nullptr;
     io::Storage_FileSeekFn  g_origSeek  = nullptr;
@@ -376,7 +375,7 @@ namespace
     }
 
     /**
-     * @brief Detours the first archive open entry point, serving from the host when possible.
+     * @brief Detours the per-file content open entry point, serving from the host when possible.
      * @param archive  archive object.
      * @param name     file name.
      * @param flags    native open flags.
@@ -387,20 +386,6 @@ namespace
     {
         if (TryServe(archive, name, flags, out)) return 1;
         return g_origOpen(archive, name, flags, out);
-    }
-
-    /**
-     * @brief Detours the second archive open entry point, serving from the host when possible.
-     * @param archive  archive object.
-     * @param name     file name.
-     * @param flags    native open flags.
-     * @param out      receives the resulting handle.
-     * @return 1 on a host hit, otherwise the native open result.
-     */
-    int __stdcall Open2Detour(void* archive, const char* name, uint32_t flags, void** out)
-    {
-        if (TryServe(archive, name, flags, out)) return 1;
-        return g_origOpen2(archive, name, flags, out);
     }
 
     /**
@@ -570,7 +555,6 @@ namespace wxl::runtime::storage
         ipc::Connect();
 
         wxl::core::hook::Install("Storage_FileOpen",  io::kFileOpen,  reinterpret_cast<void*>(&OpenDetour),  reinterpret_cast<void**>(&g_origOpen));
-        wxl::core::hook::Install("Storage_FileOpen2", io::kFileOpen2, reinterpret_cast<void*>(&Open2Detour), reinterpret_cast<void**>(&g_origOpen2));
         wxl::core::hook::Install("Storage_FileSize",  io::kFileSize,  reinterpret_cast<void*>(&SizeDetour),  reinterpret_cast<void**>(&g_origSize));
         wxl::core::hook::Install("Storage_FileRead",  io::kFileRead,  reinterpret_cast<void*>(&ReadDetour),  reinterpret_cast<void**>(&g_origRead));
         wxl::core::hook::Install("Storage_FileSeek",  io::kFileSeek,  reinterpret_cast<void*>(&SeekDetour),  reinterpret_cast<void**>(&g_origSeek));
