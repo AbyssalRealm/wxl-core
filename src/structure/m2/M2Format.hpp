@@ -201,7 +201,44 @@ namespace wxl::structure::m2
         uint8_t  _tracks[0x8C];   // 0x24  color/alpha/height/texSlot/visibility tracks + scalars
     };
 
-    /** 
+    /**
+     * @brief One M2Track<T> animation block: interpolation/global-sequence header plus the pre-Legion,
+     *        per-sequence-indexed timestamp and value tables.
+     *
+     * timestamps/values are each an array of arrays: outer entry i holds sequence i's own timestamp (or
+     * value) list, so a track with no global sequence still needs one outer entry per animation sequence
+     * the model defines. A synthesized single-key track (e.g. a static helm-bone translation) uses one
+     * outer entry pointing at one inner entry.
+     */
+    struct M2TrackHeader
+    {
+        uint16_t interpolationType; // 0x00
+        int16_t  globalSequence;    // 0x02
+        M2Array  timestamps;        // 0x04  M2Array<M2Array<uint32_t>>
+        M2Array  values;             // 0x0C  M2Array<M2Array<T>>
+    };
+
+    /**
+     * @brief One skeleton bone, 0x58 bytes: identity/parent fields plus translation/rotation/scale tracks
+     *        and the rest pose pivot.
+     */
+    struct M2CompBone
+    {
+        int32_t       boneId;         // 0x00
+        uint32_t      flags;          // 0x04
+        int16_t       parentBone;     // 0x08
+        uint16_t      submeshId;      // 0x0A
+        uint16_t      unk1;           // 0x0C
+        uint16_t      unk2;           // 0x0E
+        M2TrackHeader translation;    // 0x10
+        M2TrackHeader rotation;       // 0x24
+        M2TrackHeader scale;          // 0x38
+        float         pivot[3];       // 0x4C
+    };
+
+    constexpr uint32_t kBoneFlagTransformed = 0x200u; // flags: bone has a non-identity local transform
+
+    /**
      * @brief Shared camera track body (position/target/roll tracks plus bases).
      */
     struct M2CameraBody { uint8_t trackData[0x54]; };
@@ -234,6 +271,12 @@ namespace wxl::structure::m2
     static_assert(offsetof(M2Batch, textureCount) == 0x0E, "M2Batch.textureCount");
     static_assert(sizeof(M2SkinSection) == 0x30, "M2SkinSection");
     static_assert(offsetof(M2SkinSection, level) == 0x02, "M2SkinSection.level");
+    static_assert(sizeof(M2TrackHeader) == 0x14, "M2TrackHeader");
+    static_assert(sizeof(M2CompBone) == 0x58, "M2CompBone");
+    static_assert(offsetof(M2CompBone, translation) == 0x10, "M2CompBone.translation");
+    static_assert(offsetof(M2CompBone, rotation) == 0x24, "M2CompBone.rotation");
+    static_assert(offsetof(M2CompBone, scale) == 0x38, "M2CompBone.scale");
+    static_assert(offsetof(M2CompBone, pivot) == 0x4C, "M2CompBone.pivot");
     static_assert(sizeof(M2Ribbon) == 0xB0, "M2Ribbon");
     static_assert(sizeof(M2Camera) == 0x64, "M2Camera");
 }
