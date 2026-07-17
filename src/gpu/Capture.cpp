@@ -121,9 +121,13 @@ namespace
     /** @brief True when a reset to these sanitized params would change nothing on this device. */
     bool IsNoopReset(IDirect3DDevice9* dev, const D3DPRESENT_PARAMETERS& pp)
     {
-        return NoopResetEnabled()
-            && g_appliedMode.valid
-            && g_appliedMode.dev == dev
+        if (!NoopResetEnabled() || !g_appliedMode.valid) return false;
+
+        if (dev->TestCooperativeLevel() != D3D_OK) return false;
+        if (ID3D12Device* d12 = wxl::gpu::Device())
+            if (FAILED(d12->GetDeviceRemovedReason())) return false;
+
+        return g_appliedMode.dev == dev
             && g_appliedMode.windowed && pp.Windowed
             && g_appliedMode.width == pp.BackBufferWidth
             && g_appliedMode.height == pp.BackBufferHeight
