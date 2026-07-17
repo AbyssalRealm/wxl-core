@@ -24,6 +24,21 @@
 
 namespace wxl::game::gx
 {
+    namespace
+    {
+        // d3dcompiler_47 is delay-loaded and absent on some player machines; resolving by name keeps a
+        // shader-replacement feature a graceful no-op there instead of a delay-load fault mid-frame.
+        pD3DCompile ResolveD3DCompile()
+        {
+            static const pD3DCompile compile = [] {
+                HMODULE m = GetModuleHandleA("d3dcompiler_47.dll");
+                if (!m) m = LoadLibraryA("d3dcompiler_47.dll");
+                return m ? reinterpret_cast<pD3DCompile>(GetProcAddress(m, "D3DCompile")) : nullptr;
+            }();
+            return compile;
+        }
+    }
+
     /**
      * @brief Compiles an HLSL pixel shader into a device shader.
      * @param dev     the device to create the shader on.
@@ -34,10 +49,12 @@ namespace wxl::game::gx
     void* CompilePixelShader(Device9 dev, const char* hlsl, const char* target)
     {
         if (!dev || !hlsl) return nullptr;
+        const pD3DCompile compile = ResolveD3DCompile();
+        if (!compile) return nullptr;
 
         ID3DBlob* code = nullptr;
         ID3DBlob* err  = nullptr;
-        HRESULT hr = D3DCompile(hlsl, std::strlen(hlsl), nullptr, nullptr, nullptr, "main", target, 0, 0, &code, &err);
+        HRESULT hr = compile(hlsl, std::strlen(hlsl), nullptr, nullptr, nullptr, "main", target, 0, 0, &code, &err);
         if (err) err->Release();
         if (FAILED(hr) || !code) return nullptr;
 

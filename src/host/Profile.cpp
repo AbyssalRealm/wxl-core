@@ -144,6 +144,7 @@ namespace wxl::host::profile
             dst.transformCacheStores += src.transformCacheStores;
             dst.archiveReads += src.archiveReads;
             dst.archiveMisses += src.archiveMisses;
+            dst.nativeSkips += src.nativeSkips;
             dst.transformCalls += src.transformCalls;
             dst.transformClaims += src.transformClaims;
             dst.servedCalls += src.servedCalls;
@@ -273,9 +274,10 @@ namespace wxl::host::profile
             static_cast<unsigned long long>(window.slowRequests));
 
         wxl::core::log::Printf(
-            "host-prof-open: ok=%llu miss=%llu bytes_mb=%.1f inline_mb=%.1f shm_mb=%.1f provider=%u/%u xcache=%u/%u xcache_store=%u archive=%u/%u transform=%u/%u notify=%u aliases=%u blob_new=%u blob_reuse=%u blob_fail=%u",
+            "host-prof-open: ok=%llu miss=%llu native=%u bytes_mb=%.1f inline_mb=%.1f shm_mb=%.1f provider=%u/%u xcache=%u/%u xcache_store=%u archive=%u/%u transform=%u/%u notify=%u aliases=%u blob_new=%u blob_reuse=%u blob_fail=%u",
             static_cast<unsigned long long>(window.opensOk),
             static_cast<unsigned long long>(window.opensMiss),
+            window.open.nativeSkips,
             static_cast<double>(window.open.bytes) / (1024.0 * 1024.0),
             static_cast<double>(window.open.inlineBytes) / (1024.0 * 1024.0),
             static_cast<double>(window.open.sharedBytes) / (1024.0 * 1024.0),

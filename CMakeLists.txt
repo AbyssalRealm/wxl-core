@@ -6,6 +6,11 @@
 cmake_minimum_required(VERSION 3.20)
 project(WarcraftXL LANGUAGES CXX)
 
+# Static CRT everywhere: the DLLs load inside the player's Wow.exe and the host runs standalone on
+# machines that have no reason to carry the toolset's brand-new VC++ redistributable. A dynamic CRT
+# turns a missing/stale redist into a loader failure at process start (0xc0000142) with no log at all.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
 # The 64-bit asset host (WarcraftXLHost.exe) is opt-in: OFF by default so a contributor who only wants the
 # DLL needs no x64 toolchain and pays no build/deploy cost. build.ps1 -Host flips it on in an x64 configure.
 option(WXL_BUILD_HOST "Build WarcraftXLHost.exe (64-bit asset host)" OFF)
@@ -80,7 +85,11 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         "${CMAKE_CURRENT_SOURCE_DIR}/deps/flatbuffers/include")
 
     add_subdirectory(deps/minhook)
-    target_link_libraries(WarcraftXL PRIVATE minhook d3d9 d3dcompiler shell32)
+    target_link_libraries(WarcraftXL PRIVATE minhook d3d9 d3dcompiler shell32 delayimp)
+    # D3D12 and the shader compiler are feature-path dependencies (post-fx, grass capture, liquid
+    # shaders), not boot dependencies. Delay-loading keeps the DLL loadable on machines without them;
+    # every call site resolves or guards availability before touching those paths.
+    target_link_options(WarcraftXL PRIVATE "/DELAYLOAD:d3d12.dll" "/DELAYLOAD:d3dcompiler_47.dll")
     target_compile_definitions(WarcraftXL PRIVATE ${WXL_DEFS})
 
     source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${WXL_CORE_SRC} ${WXL_RUNTIME_SCRIPT})
@@ -119,8 +128,14 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
     add_library(d3d9 SHARED ${WXL_GPU_SRC})
     set_target_properties(d3d9 PROPERTIES OUTPUT_NAME "d3d9" PREFIX "")
     target_include_directories(d3d9 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
-    target_link_libraries(d3d9 PRIVATE d3d12 dxgi dcomp d3dcompiler)
-    target_link_options(d3d9 PRIVATE "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/Proxy.def")
+    target_link_libraries(d3d9 PRIVATE d3d12 dxgi dcomp d3dcompiler delayimp)
+    # The proxy must load on every machine Wow.exe runs on -- it shadows a static import of the exe, so
+    # a hard dependency of the proxy is a hard dependency of the game (loader failure 0xc0000142 on
+    # machines without D3D12). All On12/D3D12 machinery is delay-loaded; EnsureDevice() checks that
+    # d3d12.dll is actually present before the first delay-loaded call, else the proxy runs as a pure
+    # native pass-through.
+    target_link_options(d3d9 PRIVATE "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/Proxy.def"
+        "/DELAYLOAD:d3d12.dll" "/DELAYLOAD:dxgi.dll" "/DELAYLOAD:dcomp.dll" "/DELAYLOAD:d3dcompiler_47.dll")
     target_compile_definitions(d3d9 PRIVATE ${WXL_DEFS})
 
     # Deploy: copy the freshly linked proxy into the client folder after every build.

@@ -107,9 +107,11 @@ namespace
     // Names the host explicitly reported absent. Re-opening one skips the IPC round-trip and goes straight
     // native. Only a CONFIRMED host miss is recorded here -- never a timeout/desync -- so a transient failure
     // can never poison a servable file for the session. Capped so a pathological session stays bounded.
+    // The host answers miss for every stock-archive file (the client reads those natively), so a long
+    // session accumulates most of its unique opens here; the cap must hold them all or re-probing returns.
     std::mutex g_missMutex;
     std::unordered_set<std::string> g_knownMisses;
-    constexpr size_t kKnownMissCap = 16384;
+    constexpr size_t kKnownMissCap = 65536;
 
     std::mutex g_streamWindowMutex;
     std::unordered_map<HostFile*, StreamWindow> g_streamWindows;
@@ -519,8 +521,18 @@ namespace
         {
             // Whole-file opens need handle+0x18 populated. Copy once, then release the host section so
             // the client does not hold both a malloc buffer and a mapped view for the same large file.
+            // A transient map turns the pull into one memcpy instead of one 512 KB IPC round trip per
+            // chunk; the chunk loop remains as the fallback when the section cannot be mapped.
             f->buffer = static_cast<uint8_t*>(malloc(r.size ? r.size : 1));
             uint32_t off = 0;
+            void* view = nullptr;
+            void* viewHandle = nullptr;
+            if (f->buffer && r.size && ipc::MapBlob(r.id, r.size, view, viewHandle))
+            {
+                memcpy(f->buffer, view, r.size);
+                ipc::UnmapBlob(view, viewHandle);
+                off = r.size;
+            }
             while (f->buffer && off < r.size)
             {
                 uint32_t n = ipc::FileReadChunk(r.id, off, f->buffer + off, r.size - off);

@@ -41,8 +41,10 @@ namespace wxl::ipc
     constexpr uint32_t kHeaderSize     = 64;
     constexpr uint32_t kFileChunkMax   = 512u * 1024u;
     // Files at or below this size come back inline in the open response (one small copy). Larger files
-    // are served zero-copy via a shared blob section the client maps directly.
-    constexpr uint32_t kInlineMax      = 64u * 1024u;
+    // are served zero-copy via a shared blob section the client maps directly. Inline saves the section
+    // create/map plus the close round trip, so mid-size files (most textures) stay on the one-trip path;
+    // the response must still fit kChannelPayload with headroom for the FlexBuffers envelope.
+    constexpr uint32_t kInlineMax      = 256u * 1024u;
     constexpr uint32_t kChannelPayload = 768u * 1024u;
     constexpr uint32_t kChannelStride  = kHeaderSize + kChannelPayload;
 

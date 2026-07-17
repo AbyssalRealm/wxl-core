@@ -230,4 +230,15 @@ namespace wxl::events
      * @param args  typed args struct for the event, passed by const pointer.
      */
     void Emit(Event e, const void* args);
+
+    /**
+     * @brief Reports whether an event has at least one subscriber.
+     *
+     * For a per-draw detour, checking this before building the args struct skips the whole emission
+     * when nothing listens. Subscription happens at module load, before the render hooks run, so the
+     * unsynchronized read is stable by the time a hot path consults it.
+     * @param e  event to test.
+     * @return true when Emit(e, ...) would invoke at least one handler.
+     */
+    bool Any(Event e);
 }

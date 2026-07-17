@@ -19,8 +19,8 @@
 #include "core/Hook.hpp"
 #include "core/Logger.hpp"
 #include "game/world/Loading.hpp"
+#include "offsets/engine/Io.hpp"
 #include "offsets/game/World.hpp"
-#include "runtime/storage/ShmClient.hpp"
 
 #include <cstdint>
 #include <cstdio>
@@ -30,7 +30,7 @@
 namespace
 {
     namespace woff = wxl::offsets::game::world;
-    namespace ipc  = wxl::runtime::ipc;
+    namespace io   = wxl::offsets::engine::io;
 
     woff::TileLoaderFn g_origTileLoad = nullptr;
     char    g_childMap[64] = { 0 };       // active phase directory
@@ -47,32 +47,35 @@ namespace
         dst[n] = '\0';
     }
 
-    /** @brief Reads the phase map's WDT MAIN present table into g_phaseMain (via the host). */
+    /**
+     * @brief Reads the phase map's WDT MAIN present table into g_phaseMain.
+     *
+     * Goes through the client's own storage entry points (which are detoured): a host-served phase map
+     * and a native-archive one both resolve here, so the phase source's location never matters.
+     */
     bool LoadPhaseMain(const char* dir)
     {
         std::memset(g_phaseMain, 0, sizeof g_phaseMain);
         char path[260];
         std::snprintf(path, sizeof path, "World\\Maps\\%s\\%s.wdt", dir, dir);
 
-        ipc::FileOpenResult r = ipc::FileOpen(path, 0);
-        if (!r.ok) { WLOG_INFO("phasing: phase WDT '%s' not found", path); return false; }
+        auto open  = reinterpret_cast<io::Storage_FileOpenFn>(io::kFileOpen);
+        auto size  = reinterpret_cast<io::Storage_FileSizeFn>(io::kFileSize);
+        auto read  = reinterpret_cast<io::Storage_FileReadFn>(io::kFileRead);
+        auto close = reinterpret_cast<io::Storage_FileCloseFn>(io::kFileClose);
 
-        std::vector<uint8_t> wdt;
-        if (r.id == 0)
-            wdt = std::move(r.inlineData);
-        else
+        void* handle = nullptr;
+        if (!open(nullptr, path, 0, &handle) || !handle)
         {
-            wdt.resize(r.size);
-            uint32_t off = 0;
-            while (off < r.size)
-            {
-                const uint32_t n = ipc::FileReadChunk(r.id, off, wdt.data() + off, r.size - off);
-                if (!n) break;
-                off += n;
-            }
-            ipc::FileClose(r.id);
-            wdt.resize(off);
+            WLOG_INFO("phasing: phase WDT '%s' not found", path);
+            return false;
         }
+
+        std::vector<uint8_t> wdt(size(handle, nullptr));
+        uint32_t got = 0;
+        if (!wdt.empty()) read(handle, wdt.data(), static_cast<uint32_t>(wdt.size()), &got, nullptr, 0);
+        close(handle);
+        wdt.resize(got);
 
         // Walk the WDT chunks for MAIN (stored 'NIAM'); copy its 64x64 present-table data into g_phaseMain.
         for (size_t p = 0; p + 8 <= wdt.size(); )

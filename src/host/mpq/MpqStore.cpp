@@ -218,9 +218,11 @@ namespace wxl::host::mpq
         });
 
         // Archive set, highest priority first (search order). Custom patches (Patch-4.MPQ and beyond)
-        // outrank the standard patch-3/-2/base set, matching the client's own patch precedence.
-        std::vector<std::string> candidates;
-        for (const std::string& d : extraArchives) candidates.push_back("Data\\" + d);
+        // outrank the standard patch-3/-2/base set, matching the client's own patch precedence. The
+        // extra/standard split is kept per mounted archive so Locate can tell a stock file (the client
+        // reads it natively) from custom-archive content.
+        std::vector<std::pair<std::string, bool>> candidates; // (relative path, is extra)
+        for (const std::string& d : extraArchives) candidates.push_back({ "Data\\" + d, true });
         const std::vector<std::string> standard = {
             "Data\\" + loc + "\\patch-" + loc + "-3.MPQ", "Data\\patch-3.MPQ",
             "Data\\" + loc + "\\patch-" + loc + "-2.MPQ", "Data\\patch-2.MPQ",
@@ -238,13 +240,13 @@ namespace wxl::host::mpq
             "Data\\common-2.MPQ",
             "Data\\common.MPQ",
         };
-        candidates.insert(candidates.end(), standard.begin(), standard.end());
+        for (const std::string& rel : standard) candidates.push_back({ rel, false });
 
         // Resolve by exact name only (never enumerate); skip the internal (listfile) and (attributes).
         const DWORD openFlags = MPQ_OPEN_READ_ONLY | MPQ_OPEN_NO_LISTFILE | MPQ_OPEN_NO_ATTRIBUTES;
 
         const ULONGLONG t0 = GetTickCount64();
-        for (const std::string& rel : candidates)
+        for (const auto& [rel, isExtra] : candidates)
         {
             std::string full = root + "\\" + rel;
             if (!FileExistsOnDisk(full)) continue;
@@ -253,6 +255,8 @@ namespace wxl::host::mpq
             {
                 m_archives.push_back(hMpq);
                 m_archiveNames.push_back(rel);
+                m_archiveIsExtra.push_back(isExtra);
+                m_archiveLocks.push_back(std::make_unique<std::mutex>());
             }
             else
             {
@@ -430,9 +434,26 @@ namespace wxl::host::mpq
         const std::string name = NormalizeName(rawName);
         for (const std::string& lr : m_looseRoots)
             if (FileExistsOnDisk(lr + name)) return true;
-        for (void* a : m_archives)
-            if (SFileHasFile(static_cast<HANDLE>(a), name.c_str())) return true;
+        for (size_t i = 0; i < m_archives.size(); ++i)
+        {
+            std::lock_guard<std::mutex> lock(*m_archiveLocks[i]);
+            if (SFileHasFile(static_cast<HANDLE>(m_archives[i]), name.c_str())) return true;
+        }
         return false;
+    }
+
+    Source MpqStore::Locate(std::string_view rawName) const
+    {
+        const std::string name = NormalizeName(rawName);
+        for (const std::string& lr : m_looseRoots)
+            if (FileExistsOnDisk(lr + name)) return Source::Loose;
+        for (size_t i = 0; i < m_archives.size(); ++i)
+        {
+            std::lock_guard<std::mutex> lock(*m_archiveLocks[i]);
+            if (SFileHasFile(static_cast<HANDLE>(m_archives[i]), name.c_str()))
+                return m_archiveIsExtra[i] ? Source::Extra : Source::Standard;
+        }
+        return Source::None;
     }
 
     /**
@@ -457,10 +478,11 @@ namespace wxl::host::mpq
             return true;
         }
 
-        for (void* a : m_archives)
+        for (size_t i = 0; i < m_archives.size(); ++i)
         {
+            std::lock_guard<std::mutex> lock(*m_archiveLocks[i]);
             HANDLE hFile = nullptr;
-            if (!SFileOpenFileEx(static_cast<HANDLE>(a), name.c_str(), 0, &hFile) || !hFile) continue;
+            if (!SFileOpenFileEx(static_cast<HANDLE>(m_archives[i]), name.c_str(), 0, &hFile) || !hFile) continue;
             DWORD high = 0;
             DWORD sz = SFileGetFileSize(hFile, &high);
             if (sz == SFILE_INVALID_SIZE) { SFileCloseFile(hFile); continue; }
@@ -503,10 +525,11 @@ namespace wxl::host::mpq
             return true;
         }
 
-        for (void* a : m_archives)
+        for (size_t i = 0; i < m_archives.size(); ++i)
         {
+            std::lock_guard<std::mutex> lock(*m_archiveLocks[i]);
             HANDLE hFile = nullptr;
-            if (!SFileOpenFileEx(static_cast<HANDLE>(a), name.c_str(), 0, &hFile) || !hFile) continue;
+            if (!SFileOpenFileEx(static_cast<HANDLE>(m_archives[i]), name.c_str(), 0, &hFile) || !hFile) continue;
             DWORD high = 0;
             DWORD size = SFileGetFileSize(hFile, &high);
             if (size == SFILE_INVALID_SIZE) { SFileCloseFile(hFile); continue; }

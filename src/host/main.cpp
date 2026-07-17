@@ -54,32 +54,10 @@ namespace
     DWORD       g_clientPid = 0; // client process to shadow; host exits when it closes
     std::string g_clientRoot;    // client data root (the host runs from the client Utils folder)
 
-    // Serve store, shared by every channel worker. StormLib handles are single-thread, so raw archive
-    // I/O is serialized behind g_mpqMutex; the much more expensive Transform call that follows a read
-    // runs outside the lock, so worker threads still reshape different files concurrently. Mounted lazily.
+    // Serve store, shared by every channel worker. MpqStore locks per archive internally, so two workers
+    // only serialize when they read from the same archive; loose-folder reads and Transform calls run
+    // fully concurrent across the pool.
     std::unique_ptr<MpqStore> g_mpq;
-    std::mutex                g_mpqMutex;
-
-    /** @brief Serialized MpqStore::ReadAll. @return false if the file is absent. */
-    bool MpqReadAll(const std::string& name, std::vector<uint8_t>& out)
-    {
-        std::lock_guard<std::mutex> lock(g_mpqMutex);
-        return g_mpq->ReadAll(name, out);
-    }
-
-    /** @brief Serialized MpqStore::Exists. @return true if the file is present. */
-    bool MpqExists(const std::string& name)
-    {
-        std::lock_guard<std::mutex> lock(g_mpqMutex);
-        return g_mpq->Exists(name);
-    }
-
-    /** @brief Serialized MpqStore::ResolveByFileName. @return a serveable path, or empty if none is indexed. */
-    std::string MpqResolveByFileName(const std::string& name)
-    {
-        std::lock_guard<std::mutex> lock(g_mpqMutex);
-        return g_mpq->ResolveByFileName(name);
-    }
 
     // Large files are served zero-copy: the host copies the bytes once into a named shared section and
     // keeps it alive until the client closes the id.
@@ -97,9 +75,11 @@ namespace
 
     // Transforms are pure for a given archive path. Cache transformed outputs in the 64-bit host so expensive
     // cold work like DXT component palettization and MD21 dechunk/downport is not repeated on every reopen.
+    // Bytes are shared: an alias key and its resolved key point at one buffer, and a hit copies the bytes
+    // out AFTER releasing the cache lock so a multi-MB hit never stalls the other workers.
     struct TransformCacheEntry
     {
-        std::vector<uint8_t> bytes;
+        std::shared_ptr<const std::vector<uint8_t>> bytes;
         std::list<std::string>::iterator lru;
     };
 
@@ -132,15 +112,28 @@ namespace
     size_t TransformCacheMaxBytes()
     {
         static const size_t bytes = static_cast<size_t>(
-            EnvU64("WXL_TRANSFORM_CACHE_MB", 128, 32, 4096) * 1024ull * 1024ull);
+            EnvU64("WXL_TRANSFORM_CACHE_MB", 512, 32, 8192) * 1024ull * 1024ull);
         return bytes;
     }
 
+    // The entry cap must hold a merged monolithic terrain tile (tens of MB), else every reopen of a big
+    // tile repeats the whole merge -- the single most expensive host stall while streaming the world.
     size_t TransformCacheMaxEntry()
     {
         static const size_t bytes = static_cast<size_t>(
-            EnvU64("WXL_TRANSFORM_CACHE_ENTRY_MB", 8, 1, 256) * 1024ull * 1024ull);
+            EnvU64("WXL_TRANSFORM_CACHE_ENTRY_MB", 64, 1, 512) * 1024ull * 1024ull);
         return bytes;
+    }
+
+    // When off (default), a request whose winning source is a standard stock archive answers NotFound
+    // without reading a byte: the client mounts those same archives natively and reads the identical
+    // bytes itself, off the IPC path. Loose folders, custom patch archives, aliases, providers and
+    // transforms still serve. Set WXL_HOST_SERVE_NATIVE=1 to restore serving everything.
+    bool g_serveNativeForced = false; // --provide dumps must resolve native content too
+    bool ServeNativeArchives()
+    {
+        static const bool enabled = EnvTruthy(std::getenv("WXL_HOST_SERVE_NATIVE"));
+        return enabled || g_serveNativeForced;
     }
 
     bool ConsoleOpenLogRequested()
@@ -578,11 +571,12 @@ namespace
         HOST_OPEN_CONSOLE("open  %-44s -> OK inline (%u B)\n", name, size);
     }
 
-    bool TryTransformCache(const std::string& name, std::vector<uint8_t>& out, hprof::OpenTrace& trace)
+    std::shared_ptr<const std::vector<uint8_t>> LookupTransformCache(const std::string& name,
+                                                                     hprof::OpenTrace& trace)
     {
         ++trace.transformCacheLookups;
         const uint64_t started = hprof::Now();
-        bool hit = false;
+        std::shared_ptr<const std::vector<uint8_t>> hit;
         {
             std::lock_guard<std::mutex> lock(g_transformCacheMutex);
             auto it = g_transformCache.find(name);
@@ -592,8 +586,7 @@ namespace
                 // write-once 128 MB bucket: after it filled, every transform for a newly teleported-to area
                 // was repeated until the host restarted.
                 g_transformCacheLru.splice(g_transformCacheLru.end(), g_transformCacheLru, it->second.lru);
-                out = it->second.bytes;
-                hit = true;
+                hit = it->second.bytes;
             }
         }
         trace.transformCacheTicks += hprof::Now() - started;
@@ -601,9 +594,11 @@ namespace
         return hit;
     }
 
-    void RememberTransform(const std::string& name, const std::vector<uint8_t>& bytes, hprof::OpenTrace& trace)
+    void RememberTransform(const std::string& name,
+                           const std::shared_ptr<const std::vector<uint8_t>>& bytes,
+                           hprof::OpenTrace& trace)
     {
-        if (bytes.empty() || bytes.size() > TransformCacheMaxEntry()) return;
+        if (!bytes || bytes->empty() || bytes->size() > TransformCacheMaxEntry()) return;
 
         const uint64_t started = hprof::Now();
         std::lock_guard<std::mutex> lock(g_transformCacheMutex);
@@ -613,12 +608,12 @@ namespace
             try
             {
                 const size_t limit = TransformCacheMaxBytes();
-                while (!g_transformCacheLru.empty() && g_transformCacheBytes + bytes.size() > limit)
+                while (!g_transformCacheLru.empty() && g_transformCacheBytes + bytes->size() > limit)
                 {
                     auto oldest = g_transformCache.find(g_transformCacheLru.front());
                     if (oldest != g_transformCache.end())
                     {
-                        g_transformCacheBytes -= oldest->second.bytes.size();
+                        g_transformCacheBytes -= oldest->second.bytes->size();
                         g_transformCache.erase(oldest);
                     }
                     g_transformCacheLru.pop_front();
@@ -629,7 +624,7 @@ namespace
                 (void)it;
                 if (inserted)
                 {
-                    g_transformCacheBytes += bytes.size();
+                    g_transformCacheBytes += bytes->size();
                     ++trace.transformCacheStores;
                     pendingLru = g_transformCacheLru.end();
                 }
@@ -656,23 +651,48 @@ namespace
 
     /**
      * @brief Reads raw archive bytes for `name`, offers them to the transform hooks, else passes them through.
-     * @param name  archive-internal file name
-     * @param out   receives the reshaped or raw bytes
-     * @return false only on an archive miss; provider hooks are fired by the caller, not here
+     *
+     * A direct request (readName == requestName) whose winning source is a standard stock archive is not
+     * read at all: `nativeHit` is set and the caller answers NotFound, letting the client read the same
+     * bytes from its own natively mounted archive without the IPC copy. Alias reads always serve, since
+     * the client cannot resolve an alias natively.
+     * @param name       archive-internal file name
+     * @param out        receives the reshaped or raw bytes
+     * @param nativeHit  set when the name was skipped in favour of the client's native read
+     * @return false on an archive miss or a native skip; provider hooks are fired by the caller, not here
      */
     bool ProduceCandidate(const std::string& requestName, const std::string& readName,
-                          std::vector<uint8_t>& out, hprof::OpenTrace& trace)
+                          std::vector<uint8_t>& out, hprof::OpenTrace& trace, bool& nativeHit)
     {
-        if (TryTransformCache(readName, out, trace))
+        if (auto hit = LookupTransformCache(readName, trace))
         {
-            if (readName != requestName) RememberTransform(requestName, out, trace);
+            if (readName != requestName) RememberTransform(requestName, hit, trace);
+            out = *hit; // copy outside the cache lock
             return true;
+        }
+
+        if (!ServeNativeArchives() && readName == requestName)
+        {
+            const uint64_t locateStarted = hprof::Now();
+            const wxl::host::mpq::Source source = g_mpq->Locate(readName);
+            trace.archiveTicks += hprof::Now() - locateStarted;
+            if (source == wxl::host::mpq::Source::None)
+            {
+                ++trace.archiveMisses;
+                return false;
+            }
+            if (source == wxl::host::mpq::Source::Standard)
+            {
+                ++trace.nativeSkips;
+                nativeHit = true;
+                return false;
+            }
         }
 
         std::vector<uint8_t> raw;
         ++trace.archiveReads;
         const uint64_t archiveStarted = hprof::Now();
-        const bool archiveHit = MpqReadAll(readName, raw);
+        const bool archiveHit = g_mpq->ReadAll(readName, raw);
         trace.archiveTicks += hprof::Now() - archiveStarted;
         if (!archiveHit)
         {
@@ -688,9 +708,10 @@ namespace
         if (transformed)
         {
             ++trace.transformClaims;
-            RememberTransform(readName, reshaped, trace);
-            if (readName != requestName) RememberTransform(requestName, reshaped, trace);
-            out = std::move(reshaped);
+            out = reshaped; // serve copy; the cache owns the moved-in original
+            auto shared = std::make_shared<const std::vector<uint8_t>>(std::move(reshaped));
+            RememberTransform(readName, shared, trace);
+            if (readName != requestName) RememberTransform(requestName, shared, trace);
             return true;
         }
         out = std::move(raw);
@@ -699,11 +720,14 @@ namespace
 
     bool ProduceServed(const std::string& name, std::vector<uint8_t>& out, hprof::OpenTrace& trace)
     {
-        if (TryTransformCache(name, out, trace))
+        bool nativeHit = false;
+        if (ProduceCandidate(name, name, out, trace, nativeHit))
             return true;
 
-        if (ProduceCandidate(name, name, out, trace))
-            return true;
+        // A native hit means the client will read these exact bytes from its own archives; trying the
+        // aliases here could serve a DIFFERENT file over a name the client resolves fine natively.
+        if (nativeHit)
+            return false;
 
         std::vector<std::string> aliases;
         AppendSemicolonTextureAliases(name, aliases);
@@ -722,7 +746,7 @@ namespace
                 ++trace.providerHits;
                 return true;
             }
-            if (ProduceCandidate(name, alias, out, trace))
+            if (ProduceCandidate(name, alias, out, trace, nativeHit))
                 return true;
         }
 
@@ -868,7 +892,7 @@ namespace
             {
                 trace.op = hprof::RequestOp::FileExists;
                 std::string name = vec[1].AsString().str();
-                bool ok = MpqExists(name) || wxl::host::Exists(name);
+                bool ok = g_mpq->Exists(name) || wxl::host::Exists(name);
                 trace.ok = ok;
                 fbb.Vector([&]() { fbb.UInt(ok ? StOk : StNotFound); });
                 break;
@@ -1064,13 +1088,15 @@ int main(int argc, char** argv)
     wlog::Open((g_dataDir + "\\WarcraftXLHost.log").c_str());
     wlog::Printf("WarcraftXLHost starting (build %s %s)", __DATE__, __TIME__);
     hprof::LogSettings();
-    wlog::Printf("host: transform cache limit=%zu MB entry=%zu MB consoleOpenLog=%u",
+    wlog::Printf("host: transform cache limit=%zu MB entry=%zu MB consoleOpenLog=%u serveNative=%u",
                  TransformCacheMaxBytes() / (1024 * 1024),
                  TransformCacheMaxEntry() / (1024 * 1024),
-                 g_consoleOpenLog ? 1u : 0u);
+                 g_consoleOpenLog ? 1u : 0u,
+                 ServeNativeArchives() ? 1u : 0u);
     int rc = 0;
     if (!provides.empty())
     {
+        g_serveNativeForced = true;
         g_clientRoot = ClientRoot();
         wxl::host::SetClientRoot(g_clientRoot);
         g_mpq = std::make_unique<MpqStore>();

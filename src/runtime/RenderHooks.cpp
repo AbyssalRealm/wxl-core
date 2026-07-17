@@ -185,7 +185,9 @@ namespace
 
         const unsigned drawStartIndex = ExpandM2StartIndex(si);
         long r = g_origDIP(dev, pt, bv, mi, nv, drawStartIndex, pc);
-        if (g_curModel && !g_inM2Emit)
+        // Building the args and crossing into Emit costs real time at per-batch frequency; skip the
+        // whole emission while nothing subscribes.
+        if (g_curModel && !g_inM2Emit && ev::Any(ev::Event::OnM2BatchDraw))
         {
             g_inM2Emit = true;
             ev::M2BatchDrawArgs a{ dev, g_curModel, pt, bv, mi, nv, drawStartIndex, pc };

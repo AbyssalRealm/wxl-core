@@ -1250,7 +1250,14 @@ namespace
                                uint32_t* p6, uint32_t p7, int p8)
     {
         int r = g_origPlaySoundKit(soundKitId, p2, p3, p4, p5, p6, p7, p8);
-        WLOG_INFO("audio-diag: PlaySoundKit id=%d -> %d", soundKitId, r);
+        // Each failing kit id is logged once; the raw stream repeats the same missing ids dozens of
+        // times per minute and the per-line file write is itself a frame cost.
+        if (r != 0)
+        {
+            static std::unordered_set<int> loggedKits;
+            if (loggedKits.insert(soundKitId).second)
+                WLOG_INFO("audio-diag: PlaySoundKit id=%d -> %d", soundKitId, r);
+        }
         return r;
     }
 
@@ -1412,8 +1419,12 @@ namespace
     void __fastcall hkM2PerFrameUpdate(void* renderCtx, void* edx)
     {
         g_origM2PerFrame(renderCtx, edx);
-        ev::M2PerFrameUpdateArgs a{ renderCtx };
-        ev::Emit(ev::Event::OnM2PerFrameUpdate, &a);
+        // Per-visible-M2-per-frame site: skip the emission entirely while nothing subscribes.
+        if (ev::Any(ev::Event::OnM2PerFrameUpdate))
+        {
+            ev::M2PerFrameUpdateArgs a{ renderCtx };
+            ev::Emit(ev::Event::OnM2PerFrameUpdate, &a);
+        }
     }
 
     /**
@@ -1434,8 +1445,12 @@ namespace
         void* sa1, void* sa2, void* sa3, uint32_t sa4, uint32_t sa5)
     {
         g_origBuildBonePalette(renderCtx, edx, sa1, sa2, sa3, sa4, sa5);
-        ev::BuildBonePaletteArgs a{ renderCtx };
-        ev::Emit(ev::Event::OnBuildBonePalette, &a);
+        // Per-instance-per-frame site: skip the emission entirely while nothing subscribes.
+        if (ev::Any(ev::Event::OnBuildBonePalette))
+        {
+            ev::BuildBonePaletteArgs a{ renderCtx };
+            ev::Emit(ev::Event::OnBuildBonePalette, &a);
+        }
     }
 
     /**

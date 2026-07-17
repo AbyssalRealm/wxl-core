@@ -58,4 +58,14 @@ namespace wxl::events
         if (e >= Event::Count) return;
         for (const Sub& s : Bucket(e)) s.fn(s.user, args);
     }
+
+    /**
+     * @brief Reports whether an event has at least one subscriber.
+     * @param e  event to test.
+     * @return true when Emit(e, ...) would invoke at least one handler.
+     */
+    bool Any(Event e)
+    {
+        return e < Event::Count && !Bucket(e).empty();
+    }
 }

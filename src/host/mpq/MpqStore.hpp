@@ -17,15 +17,28 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
 
 // Asset-agnostic archive I/O. Serves raw bytes; whether a file needs reshaping is the asset handlers'
-// decision and the host stays format-blind. One instance per worker, since StormLib handles are single-thread.
+// decision and the host stays format-blind. Reads are safe to run concurrently: StormLib handles are
+// single-thread, so each mounted archive carries its own lock, and loose-folder reads take none. Two
+// workers reading from two different archives (or from loose folders) no longer serialize each other.
 namespace wxl::host::mpq
 {
+    /** @brief Which mounted source would serve a name (Locate). */
+    enum class Source : uint8_t
+    {
+        None,     // not present anywhere
+        Loose,    // loose override folder (host-only visibility)
+        Extra,    // custom patch archive beyond the standard set (Patch-4.MPQ and up)
+        Standard, // stock base/locale/patch archive the client also mounts natively
+    };
+
     /** @brief Mounts the client archive set and serves raw file bytes from it. */
     class MpqStore
     {
@@ -69,6 +82,16 @@ namespace wxl::host::mpq
          */
         std::string ResolveByFileName(std::string_view name) const;
 
+        /**
+         * @brief Reports which mounted source would serve `name`, without reading any bytes.
+         *
+         * Walks the same priority order as ReadAll (loose folders, then archives) but stops at the
+         * presence test, so answering is a few attribute probes and hash-table lookups.
+         * @param name  file name to locate
+         * @return the winning source kind, or Source::None
+         */
+        Source Locate(std::string_view name) const;
+
         /** @brief Closes all open archive handles. */
         ~MpqStore();
 
@@ -81,6 +104,10 @@ namespace wxl::host::mpq
         // Highest priority first (search order). StormLib handles mutate on read, so mutable.
         mutable std::vector<void*> m_archives;     // StormLib HANDLEs
         std::vector<std::string>   m_archiveNames; // parallel to m_archives, for logging
+        std::vector<bool>          m_archiveIsExtra; // parallel: custom patch beyond the standard set
+        // One lock per archive: StormLib handles are single-thread, but two different archives (and any
+        // loose-folder read) are independent, so readers only serialize on the same archive.
+        mutable std::vector<std::unique_ptr<std::mutex>> m_archiveLocks;
         std::vector<std::string>   m_looseRoots;   // absolute folder paths, trailing slash
         std::string                m_locale;       // detected locale folder name
 

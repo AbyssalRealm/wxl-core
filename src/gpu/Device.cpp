@@ -43,12 +43,48 @@ namespace
     }
 
     /**
+     * @brief Reports whether the On12 bridge may run at all: not disabled, and d3d12.dll present.
+     *
+     * Every d3d12 import of this proxy is delay-loaded, so this presence check is what stands between a
+     * D3D12-less machine and a delay-load failure -- with it, such a machine simply runs the native
+     * pass-through path. Opt-out for everyone else: WXL_NO_ON12 env or a "WarcraftXL_on12.disable" file
+     * next to the client.
+     * @return True when the D3D12 machinery is usable on this machine.
+     */
+    bool On12Usable()
+    {
+        static const bool usable = [] {
+            char env[8]{};
+            const DWORD n = GetEnvironmentVariableA("WXL_NO_ON12", env, sizeof env);
+            if (n > 0 && env[0] != '0' && env[0] != 'n' && env[0] != 'N' &&
+                env[0] != 'f' && env[0] != 'F')
+            {
+                wxl::gpu::Log("d3d9proxy: On12 disabled by WXL_NO_ON12 -> native d3d9");
+                return false;
+            }
+            if (GetFileAttributesA("WarcraftXL_on12.disable") != INVALID_FILE_ATTRIBUTES)
+            {
+                wxl::gpu::Log("d3d9proxy: On12 disabled by WarcraftXL_on12.disable -> native d3d9");
+                return false;
+            }
+            if (!LoadLibraryA("d3d12.dll"))
+            {
+                wxl::gpu::Log("d3d9proxy: d3d12.dll unavailable -> native d3d9");
+                return false;
+            }
+            return true;
+        }();
+        return usable;
+    }
+
+    /**
      * @brief Lazily creates the shared device and queue on first use.
      * @return True once the shared device and queue exist.
      */
     bool EnsureDevice()
     {
         if (g_device) return true;
+        if (!On12Usable()) return false;
 
 #ifdef WXL_D3D12_DEBUG
         // The D3D12 debug layer validates every call. With On12 funnelling all engine D3D9 calls through
