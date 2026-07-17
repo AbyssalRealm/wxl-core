@@ -116,10 +116,44 @@ namespace
     std::mutex g_streamWindowMutex;
     std::unordered_map<HostFile*, StreamWindow> g_streamWindows;
 
+    // Retired window buffers, recycled so streaming is not a steady 512 KB heap alloc/free per
+    // refill. Guarded by g_streamWindowMutex.
+    std::vector<std::vector<uint8_t>> g_windowPool;
+    constexpr size_t kWindowPoolCap = 8;
+
+    /** @brief Returns a pooled buffer resized to fetch, or a fresh one. Takes the window mutex itself. */
+    std::vector<uint8_t> AcquireWindowBuffer(uint32_t fetch)
+    {
+        {
+            std::lock_guard<std::mutex> lock(g_streamWindowMutex);
+            if (!g_windowPool.empty())
+            {
+                std::vector<uint8_t> buf = std::move(g_windowPool.back());
+                g_windowPool.pop_back();
+                buf.resize(fetch);
+                return buf;
+            }
+        }
+        return std::vector<uint8_t>(fetch);
+    }
+
+    /** @brief Pools a retired window buffer. The CALLER holds g_streamWindowMutex. */
+    void RecycleWindowBufferLocked(std::vector<uint8_t>&& buf)
+    {
+        if (buf.capacity() && g_windowPool.size() < kWindowPoolCap)
+        {
+            buf.clear();
+            g_windowPool.push_back(std::move(buf));
+        }
+    }
+
     void ClearStreamWindow(HostFile* f)
     {
         std::lock_guard<std::mutex> lock(g_streamWindowMutex);
-        g_streamWindows.erase(f);
+        auto it = g_streamWindows.find(f);
+        if (it == g_streamWindows.end()) return;
+        RecycleWindowBufferLocked(std::move(it->second.bytes));
+        g_streamWindows.erase(it);
     }
 
     // Providers/filters are registered by module installers while loader threads already run the
@@ -414,9 +448,14 @@ namespace
             const uint32_t fetch = (remaining < kStreamReadAheadSize) ? remaining : kStreamReadAheadSize;
             if (!fetch) break;
 
-            std::vector<uint8_t> fresh(fetch);
+            std::vector<uint8_t> fresh = AcquireWindowBuffer(fetch);
             uint32_t n = ipc::FileReadChunk(f->hostId, pos, fresh.data(), fetch);
-            if (n == 0) break;
+            if (n == 0)
+            {
+                std::lock_guard<std::mutex> lock(g_streamWindowMutex);
+                RecycleWindowBufferLocked(std::move(fresh));
+                break;
+            }
             fresh.resize(n);
 
             {
@@ -424,6 +463,7 @@ namespace
                 StreamWindow& w = g_streamWindows[f];
                 w.base = pos;
                 w.size = n;
+                RecycleWindowBufferLocked(std::move(w.bytes)); // retire the replaced window's buffer
                 w.bytes = std::move(fresh);
 
                 const uint32_t copyNow = (w.size < want - got) ? w.size : (want - got);

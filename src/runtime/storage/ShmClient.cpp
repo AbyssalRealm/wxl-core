@@ -435,6 +435,7 @@ namespace
     {
         const uint64_t started = profile ? QpcNow() : 0;
         bool contended = false;
+        uint32_t spins = 0;
         for (;;)
         {
             for (uint32_t i = 0; i < g_channelCount; ++i)
@@ -453,7 +454,10 @@ namespace
                 }
             }
             contended = true;
-            SwitchToThread();
+            // A full pool means every channel is deep in an IPC round trip (ms scale): a few yields
+            // catch the fast case, then sleep instead of burning a core spinning for milliseconds.
+            if (++spins <= 16) SwitchToThread();
+            else               Sleep(1);
         }
     }
 
@@ -504,8 +508,10 @@ namespace
         DWORD waited = 0;
         while (waited < kRequestTimeoutMs)
         {
+            // 5 ms slice: the event wake is immediate on the normal path; the slice only bounds how
+            // long a lost/stale wake can add to a main-thread open, so keep that worst case small.
             DWORD slice = kRequestTimeoutMs - waited;
-            if (slice > 50) slice = 50;
+            if (slice > 5) slice = 5;
             DWORD rc = WaitForSingleObject(g_respEvent[ch], slice);
             if (rc == WAIT_OBJECT_0 && hdr->respSeq == seqOut) return finishWait(true); // our response, matched
             if (rc != WAIT_OBJECT_0 && rc != WAIT_TIMEOUT) return finishWait(false);    // event failure: give up
