@@ -19,6 +19,7 @@
 #include "ipc/Protocol.hpp"
 #include "ipc/ShmServer.hpp"
 #include "mpq/MpqStore.hpp"
+#include "common/Config.hpp"
 #include "core/Logger.hpp"
 
 #include <flatbuffers/flexbuffers.h>
@@ -165,7 +166,7 @@ namespace
      */
     uint32_t ComputeWorkerCount(uint32_t channelCount)
     {
-        const uint64_t requested = EnvU64("WXL_HOST_WORKERS", 0, 0, 16);
+        const uint64_t requested = wxl::config::U64("WXL_HOST_WORKERS", 0, 0, 16);
         if (requested)
             return static_cast<uint32_t>(requested < channelCount ? requested : channelCount);
         const uint32_t workers = channelCount ? channelCount - 1 : 1;
